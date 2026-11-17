@@ -8,6 +8,8 @@ export * from './timeService';
 export * from './payrollService';
 export * from './performanceService';
 export * from './notificationService';
+export type { RecipientsResponse } from './messagingService';
+export type { RecipientsResponse as NotificationRecipientsResponse } from './notificationService';
 export * from './employeeRequestService';
 export * from './employeeDocumentService';
 export * from './hrLetterService';
@@ -23,4 +25,5 @@ export * from './associationService';
 export * from './aiService';
 export * from './miscellaneousRequestService';
 export * from './notificationBellService';
+export * from './supportService';
 

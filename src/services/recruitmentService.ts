@@ -1,5 +1,4 @@
 import { Candidate, Vacancy } from '../types';
-import { getCandidates, saveCandidates, getVacancies, saveVacancies } from '../data/mockData';
 
 const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
 const RECRUITMENT_API_BASE = `${VITE_API_URL}/recruitment`;
@@ -21,6 +20,22 @@ export interface VacancyQueryParams {
   limit?: number;
 }
 
+export interface JobPostingItem {
+  id?: string;
+  _id?: string;
+  title: string;
+  department: string;
+  platformPostId?: string;
+  locationType?: string;
+  salaryRange?: string;
+  applicantsCount?: number;
+  liveUrl?: string;
+  status?: string;
+  platform?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export const recruitmentService = {
   // ===================== CANDIDATES =====================
   async getCandidates(params?: CandidateQueryParams): Promise<Candidate[]> {
@@ -37,153 +52,119 @@ export const recruitmentService = {
       if (res.ok) {
         const json = await res.json();
         const items = json.items || json.data || [];
-        if (items.length > 0) {
-          return items.map((item: any) => ({
-            ...item,
-            id: item.id || item._id,
-            name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Candidate',
-            email: item.email || '',
-            phone: item.phone || item.contactNumber || '',
-            vacancy: item.vacancy || item.jobTitle || (item.vacancyId?.title || item.vacancyId?.jobTitle) || 'General',
-            hiringManager: item.hiringManager || 'HR Team',
-            dateApplied: item.dateApplied || (item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : '2026-03-01'),
-            status: item.status || 'Applied',
-            experienceYears: item.experienceYears !== undefined ? item.experienceYears : (item.experience || 0),
-            skills: Array.isArray(item.skills) ? item.skills : (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : []),
-            education: item.education || '',
-            resumeUrl: item.resumeUrl || '',
-            poolCategory: item.poolCategory || item.talentPool || (item.tags && item.tags[0]) || 'Technical Skills',
-            talentPool: item.talentPool || item.poolCategory || (item.tags && item.tags[0]) || 'Technical Skills',
-            notes: item.notes || '',
-          }));
-        }
+        return items.map((item: any) => ({
+          ...item,
+          id: item.id || item._id,
+          name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Candidate',
+          email: item.email || '',
+          phone: item.phone || item.contactNumber || '',
+          vacancy: item.vacancy || item.jobTitle || (item.vacancyId?.title || item.vacancyId?.jobTitle) || 'General',
+          hiringManager: item.hiringManager || 'HR Team',
+          dateApplied: item.dateApplied || (item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : '2026-03-01'),
+          status: item.status || 'Applied',
+          experienceYears: item.experienceYears !== undefined ? item.experienceYears : (item.experience || 0),
+          skills: Array.isArray(item.skills) ? item.skills : (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : []),
+          education: item.education || '',
+          resumeUrl: item.resumeUrl || '',
+          poolCategory: item.poolCategory || item.talentPool || (item.tags && item.tags[0]) || 'Technical Skills',
+          talentPool: item.talentPool || item.poolCategory || (item.tags && item.tags[0]) || 'Technical Skills',
+          notes: item.notes || '',
+        }));
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error('Error loading candidates:', err);
     }
-    return getCandidates();
+    return [];
   },
 
   async getCandidateById(id: string): Promise<Candidate | null> {
     try {
-      const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${id}`);
+      const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${encodeURIComponent(id)}`);
       if (res.ok) {
         const json = await res.json();
-        return json.data || json;
+        const item = json.data || json;
+        return {
+          ...item,
+          id: item.id || item._id,
+          name: item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Candidate',
+          email: item.email || '',
+          phone: item.phone || item.contactNumber || '',
+          skills: Array.isArray(item.skills) ? item.skills : [],
+          status: item.status || 'Applied',
+        };
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error(`Error loading candidate ${id}:`, err);
     }
-    return getCandidates().find((c) => c.id === id) || null;
+    return null;
   },
 
   async createCandidate(candidate: Omit<Candidate, 'id' | 'dateApplied'> & { dateApplied?: string }): Promise<Candidate> {
-    try {
-      const payload = {
-        ...candidate,
-        tags: candidate.poolCategory ? [candidate.poolCategory] : candidate.skills,
-      };
-      const res = await fetch(`${RECRUITMENT_API_BASE}/candidates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const created = json.data || json;
-        return {
-          ...created,
-          id: created.id || created._id,
-          name: created.name || candidate.name,
-          email: created.email || candidate.email,
-          phone: created.phone || candidate.phone,
-          skills: created.skills || candidate.skills,
-          experienceYears: created.experienceYears !== undefined ? created.experienceYears : candidate.experienceYears,
-          education: created.education || candidate.education,
-          resumeUrl: created.resumeUrl || candidate.resumeUrl,
-          poolCategory: candidate.poolCategory || 'Technical Skills',
-          talentPool: candidate.talentPool || candidate.poolCategory || 'Technical Skills',
-          status: created.status || candidate.status || 'Applied',
-          dateApplied: created.dateApplied || candidate.dateApplied || new Date().toISOString().split('T')[0],
-        };
-      }
-    } catch {
-      // Fallback
-    }
-    const list = getCandidates();
-    const newCand: Candidate = {
+    const payload = {
       ...candidate,
-      id: `CAND-${Math.floor(100 + Math.random() * 900)}`,
-      dateApplied: candidate.dateApplied || new Date().toISOString().split('T')[0],
+      tags: candidate.poolCategory ? [candidate.poolCategory] : candidate.skills,
     };
-    saveCandidates([newCand, ...list]);
-    return newCand;
+    const res = await fetch(`${RECRUITMENT_API_BASE}/candidates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to create candidate in MongoDB');
+    }
+    const created = json.data || json;
+    return {
+      ...created,
+      id: created.id || created._id,
+      name: created.name || candidate.name,
+      email: created.email || candidate.email,
+      phone: created.phone || candidate.phone,
+      skills: created.skills || candidate.skills,
+      experienceYears: created.experienceYears !== undefined ? created.experienceYears : candidate.experienceYears,
+      education: created.education || candidate.education,
+      resumeUrl: created.resumeUrl || candidate.resumeUrl,
+      poolCategory: candidate.poolCategory || 'Technical Skills',
+      talentPool: candidate.talentPool || candidate.poolCategory || 'Technical Skills',
+      status: created.status || candidate.status || 'Applied',
+      dateApplied: created.dateApplied || candidate.dateApplied || new Date().toISOString().split('T')[0],
+    };
   },
 
   async updateCandidate(id: string, updates: Partial<Candidate>): Promise<Candidate> {
-    try {
-      const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        return json.data || json;
-      }
-    } catch {
-      // Fallback
-    }
-    const list = getCandidates();
-    const index = list.findIndex((c) => c.id === id);
-    if (index === -1) throw new Error('Candidate not found');
-    list[index] = { ...list[index], ...updates };
-    saveCandidates(list);
-    return list[index];
-  },
-
-  async updateCandidateStatus(id: string, status: Candidate['status']): Promise<Candidate> {
-    try {
-      const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        return json.data || json;
-      }
-    } catch {
-      // Fallback
-    }
-    const list = getCandidates();
-    const index = list.findIndex((c) => c.id === id);
-    if (index === -1) throw new Error('Candidate not found');
-    list[index].status = status;
-    saveCandidates(list);
-    return list[index];
-  },
-
-  async convertToEmployee(candidateId: string, payload?: any): Promise<any> {
-    const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${candidateId}/convert-to-employee`, {
-      method: 'POST',
+    const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${encodeURIComponent(id)}`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
+      body: JSON.stringify(updates),
     });
+    const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error('Failed to convert candidate to employee');
+      throw new Error(json.message || 'Failed to update candidate');
     }
-    return res.json();
+    const data = json.data || json;
+    return { ...data, id: data.id || data._id };
+  },
+
+  async updateCandidateStatus(id: string, status: string, comment?: string): Promise<Candidate> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, comment }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to update candidate status');
+    }
+    const data = json.data || json;
+    return { ...data, id: data.id || data._id };
   },
 
   async deleteCandidate(id: string): Promise<void> {
-    try {
-      await fetch(`${RECRUITMENT_API_BASE}/candidates/${id}`, { method: 'DELETE' });
-    } catch {
-      // Fallback
+    const res = await fetch(`${RECRUITMENT_API_BASE}/candidates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || 'Failed to delete candidate');
     }
-    const list = getCandidates().filter((c) => c.id !== id);
-    saveCandidates(list);
   },
 
   // ===================== VACANCIES =====================
@@ -201,108 +182,117 @@ export const recruitmentService = {
       if (res.ok) {
         const json = await res.json();
         const items = json.items || json.data || [];
-        if (items.length > 0) {
-          return items.map((item: any) => ({
-            ...item,
-            id: item.id || item._id,
-            department: item.department || item.vacancy || item.title || 'General',
-            jobTitle: item.jobTitle || item.title || 'Position',
-            hiringManager: item.hiringManager || 'HR Manager',
-            noOfOpenings: item.noOfOpenings || item.numberOfPositions || 1,
-            description: item.description || item.jobDescription || '',
-            requirements: item.requirements || '',
-            status: item.status || 'Available',
-            datePosted: item.datePosted || (item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : '2026-03-01'),
-          }));
-        }
+        return items.map((item: any) => ({
+          ...item,
+          id: item.id || item._id,
+          department: item.department || item.vacancy || item.title || 'General',
+          jobTitle: item.jobTitle || item.title || 'Position',
+          hiringManager: item.hiringManager || 'HR Manager',
+          noOfOpenings: item.noOfOpenings || item.numberOfPositions || 1,
+          filledPositions: item.filledPositions !== undefined ? item.filledPositions : 0,
+          remainingPositions: item.remainingPositions !== undefined ? item.remainingPositions : (item.noOfOpenings || item.numberOfPositions || 1),
+          description: item.description || item.jobDescription || '',
+          requirements: item.requirements || '',
+          status: item.status || 'Available',
+          datePosted: item.datePosted || (item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : '2026-03-01'),
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+        }));
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error('Error loading vacancies:', err);
     }
-    return getVacancies();
+    return [];
+  },
+
+  async getVacancyById(id: string): Promise<Vacancy | null> {
+    try {
+      const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${encodeURIComponent(id)}`);
+      if (res.ok) {
+        const json = await res.json();
+        const item = json.data || json;
+        return {
+          ...item,
+          id: item.id || item._id,
+          department: item.department || item.vacancy || item.title || 'General',
+          jobTitle: item.jobTitle || item.title || 'Position',
+          noOfOpenings: item.noOfOpenings || item.numberOfPositions || 1,
+          status: item.status || 'Available',
+        };
+      }
+    } catch (err) {
+      console.error(`Error loading vacancy ${id}:`, err);
+    }
+    return null;
+  },
+
+  async getVacancyPipeline(id: string): Promise<any> {
+    try {
+      const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${encodeURIComponent(id)}/pipeline`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || json;
+      }
+    } catch (err) {
+      console.error(`Error loading vacancy pipeline for ${id}:`, err);
+    }
+    return null;
   },
 
   async createVacancy(vacancy: Omit<Vacancy, 'id' | 'datePosted'> & { datePosted?: string }): Promise<Vacancy> {
-    try {
-      const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(vacancy),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const created = json.data || json;
-        return {
-          ...created,
-          id: created.id || created._id,
-        };
-      }
-    } catch {
-      // Fallback
+    const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(vacancy),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to create vacancy');
     }
-    const list = getVacancies();
-    const newVac: Vacancy = {
-      ...vacancy,
-      id: `VAC-${Math.floor(100 + Math.random() * 900)}`,
-      datePosted: vacancy.datePosted || new Date().toISOString().split('T')[0],
-      requirements: vacancy.requirements || '',
+    const created = json.data || json;
+    return {
+      ...created,
+      id: created.id || created._id,
+      noOfOpenings: created.noOfOpenings || created.numberOfPositions || vacancy.noOfOpenings || 1,
+      filledPositions: 0,
+      remainingPositions: created.noOfOpenings || vacancy.noOfOpenings || 1,
     };
-    saveVacancies([newVac, ...list]);
-    return newVac;
   },
 
   async updateVacancy(id: string, updates: Partial<Vacancy>): Promise<Vacancy> {
-    try {
-      const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        return json.data || json;
-      }
-    } catch {
-      // Fallback
+    const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to update vacancy');
     }
-    const list = getVacancies();
-    const index = list.findIndex((v) => v.id === id);
-    if (index === -1) throw new Error('Vacancy not found');
-    list[index] = { ...list[index], ...updates };
-    saveVacancies(list);
-    return list[index];
+    const data = json.data || json;
+    return { ...data, id: data.id || data._id };
   },
 
-  async updateVacancyStatus(id: string, status: 'Available' | 'Closed'): Promise<Vacancy> {
-    try {
-      const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        return json.data || json;
-      }
-    } catch {
-      // Fallback
+  async updateVacancyStatus(id: string, status: string): Promise<Vacancy> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to update vacancy status');
     }
-    const list = getVacancies();
-    const index = list.findIndex((v) => v.id === id);
-    if (index === -1) throw new Error('Vacancy not found');
-    list[index].status = status;
-    saveVacancies(list);
-    return list[index];
+    const data = json.data || json;
+    return { ...data, id: data.id || data._id };
   },
 
   async deleteVacancy(id: string): Promise<void> {
-    try {
-      await fetch(`${RECRUITMENT_API_BASE}/vacancies/${id}`, { method: 'DELETE' });
-    } catch {
-      // Fallback
+    const res = await fetch(`${RECRUITMENT_API_BASE}/vacancies/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || 'Failed to delete vacancy');
     }
-    const list = getVacancies().filter((v) => v.id !== id);
-    saveVacancies(list);
   },
 
   // ===================== JOB POSTINGS & LETGETIN =====================
@@ -314,10 +304,23 @@ export const recruitmentService = {
         const json = await res.json();
         return json.items || json.data || [];
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error('Error fetching job postings:', err);
     }
     return [];
+  },
+
+  async getJobPostingById(id: string): Promise<any> {
+    try {
+      const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${encodeURIComponent(id)}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || json;
+      }
+    } catch (err) {
+      console.error(`Error fetching job posting ${id}:`, err);
+    }
+    return null;
   },
 
   async createJobPosting(data: any): Promise<any> {
@@ -326,23 +329,196 @@ export const recruitmentService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to create job posting');
+    }
+    return json.data || json;
+  },
+
+  async updateJobPosting(id: string, data: any): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to update job posting');
+    }
+    return json.data || json;
   },
 
   async publishJobPosting(id: string, platform = 'LetsGetIn'): Promise<any> {
-    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${id}/publish`, {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${encodeURIComponent(id)}/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platform }),
     });
-    return res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to publish job posting');
+    }
+    return json.data || json;
+  },
+
+  async unpublishJobPosting(id: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${encodeURIComponent(id)}/unpublish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to unpublish job');
+    }
+    return json.data || json;
   },
 
   async closeJobPosting(id: string): Promise<any> {
-    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${id}/close`, {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${encodeURIComponent(id)}/close`, {
       method: 'POST',
     });
-    return res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to close job posting');
+    }
+    return json.data || json;
+  },
+
+  async deleteJobPosting(id: string): Promise<void> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || 'Failed to delete job posting');
+    }
+  },
+
+  async postToLetGetIn(data: any): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/post-letgetin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to publish job to LetGetIn');
+    }
+    return json.data || json;
+  },
+
+  async getActiveLetGetIn(params?: any): Promise<any[]> {
+    try {
+      const searchParams = new URLSearchParams(params || {});
+      const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/letgetin/active?${searchParams.toString()}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.items || json.data || [];
+      }
+    } catch (err) {
+      console.error('Error fetching active LetGetIn postings:', err);
+    }
+    return [];
+  },
+
+  async syncLetGetIn(): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/job-postings/letgetin/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to synchronize with LetGetIn network');
+    }
+    return json.data || json;
+  },
+
+  // ===================== TALENT POOL =====================
+  async getTalentPools(params?: any): Promise<any[]> {
+    try {
+      const searchParams = new URLSearchParams(params || {});
+      const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool?${searchParams.toString()}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.items || json.data || [];
+      }
+    } catch (err) {
+      console.error('Error fetching talent pools:', err);
+    }
+    return [];
+  },
+
+  async createTalentPool(data: any): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to create talent pool');
+    }
+    return json.data || json;
+  },
+
+  async updateTalentPool(id: string, data: any): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to update talent pool');
+    }
+    return json.data || json;
+  },
+
+  async deleteTalentPool(id: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to delete talent pool');
+    }
+    return json;
+  },
+
+  async addCandidateToPool(poolId: string, data: { candidateId: string; notes?: string; rating?: number }): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool/${encodeURIComponent(poolId)}/candidates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to add candidate to talent pool');
+    }
+    return json.data || json;
+  },
+
+  async removeCandidateFromPool(poolId: string, candidateId: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool/${encodeURIComponent(poolId)}/candidates/${encodeURIComponent(candidateId)}`, {
+      method: 'DELETE',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to remove candidate from talent pool');
+    }
+    return json.data || json;
+  },
+
+  async associateCandidateWithJob(poolId: string, candidateId: string, vacancyId: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool/${encodeURIComponent(poolId)}/associate-job`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidateId, vacancyId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to associate candidate with job vacancy');
+    }
+    return json.data || json;
   },
 
   // ===================== APPLICATIONS & PIPELINE =====================
@@ -383,7 +559,7 @@ export const recruitmentService = {
   },
 
   async updateApplicationStatus(id: string, data: { status: string; stage?: string; comment?: string }): Promise<any> {
-    const res = await fetch(`${RECRUITMENT_API_BASE}/applications/${id}/status`, {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/applications/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -391,10 +567,24 @@ export const recruitmentService = {
     return res.json();
   },
 
+  async deleteApplication(id: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/applications/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    return res.json().catch(() => ({}));
+  },
+
   // ===================== RESUMES & CV PARSER =====================
   async getResumes(params?: any): Promise<any[]> {
     try {
-      const searchParams = new URLSearchParams(params || {});
+      const searchParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '') {
+            searchParams.append(k, String(v));
+          }
+        });
+      }
       const res = await fetch(`${RECRUITMENT_API_BASE}/resumes?${searchParams.toString()}`);
       if (res.ok) {
         const json = await res.json();
@@ -406,13 +596,76 @@ export const recruitmentService = {
     return [];
   },
 
-  async parseCv(data: { rawText?: string; vacancyId?: string; targetSkills?: string[]; fileName?: string }): Promise<any> {
+  async getResumeMetrics(): Promise<{
+    totalResumes: number;
+    verifiedCount: number;
+    highMatchCount: number;
+    shortlistedCount: number;
+  }> {
+    try {
+      const res = await fetch(`${RECRUITMENT_API_BASE}/resumes/metrics`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || json;
+      }
+    } catch {
+      // Fallback
+    }
+    return { totalResumes: 0, verifiedCount: 0, highMatchCount: 0, shortlistedCount: 0 };
+  },
+
+  async syncLetsGetInResumes(): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/resumes/sync-letsgetin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to sync resumes from LetsGetIn network');
+    }
+    return json.data || json;
+  },
+
+  async createResume(data: any): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/resumes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to create resume');
+    }
+    return json.data || json;
+  },
+
+  async deleteResume(id: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/resumes/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    return res.json().catch(() => ({}));
+  },
+
+  async matchResumeVacancy(resumeId: string, vacancyId: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/resumes/${encodeURIComponent(resumeId)}/match-vacancy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vacancyId }),
+    });
+    return res.json();
+  },
+
+  async parseCv(data: { rawText?: string; vacancyId?: string; targetSkills?: string[]; fileName?: string; fileUrl?: string }): Promise<any> {
     const res = await fetch(`${RECRUITMENT_API_BASE}/resumes/parse-cv`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to parse CV');
+    }
+    return json.data || json;
   },
 
   // ===================== INTERVIEWS & FEEDBACK =====================
@@ -441,7 +694,14 @@ export const recruitmentService = {
 
   async getFeedback(params?: any): Promise<any[]> {
     try {
-      const searchParams = new URLSearchParams(params || {});
+      const searchParams = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '') {
+            searchParams.append(k, String(v));
+          }
+        });
+      }
       const res = await fetch(`${RECRUITMENT_API_BASE}/feedback?${searchParams.toString()}`);
       if (res.ok) {
         const json = await res.json();
@@ -459,40 +719,18 @@ export const recruitmentService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
-  },
-
-  // ===================== TALENT POOL =====================
-  async getTalentPools(params?: any): Promise<any[]> {
-    try {
-      const searchParams = new URLSearchParams(params || {});
-      const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool?${searchParams.toString()}`);
-      if (res.ok) {
-        const json = await res.json();
-        return json.items || json.data || [];
-      }
-    } catch {
-      // Fallback
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json.message || 'Failed to submit interview feedback');
     }
-    return [];
+    return json.data || json;
   },
 
-  async createTalentPool(data: any): Promise<any> {
-    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+  async deleteFeedback(id: string): Promise<any> {
+    const res = await fetch(`${RECRUITMENT_API_BASE}/feedback/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     });
-    return res.json();
-  },
-
-  async addCandidateToPool(poolId: string, data: { candidateId: string; notes?: string; rating?: number }): Promise<any> {
-    const res = await fetch(`${RECRUITMENT_API_BASE}/talent-pool/${poolId}/candidates`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    return res.json();
+    return res.json().catch(() => ({}));
   },
 };
 

@@ -4,6 +4,8 @@ import {
   AppraisalQueryParams,
   AppraisalReportsSummary,
   IEndorsementItem,
+  IFeedback360Item,
+  IAppraisalCycle,
 } from '../types/performanceAppraisal';
 
 const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
@@ -16,7 +18,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}));
-    throw new Error(errorBody.message || `HTTP error! status: ${res.status}`);
+    throw new Error(errorBody.message || errorBody.error?.message || `HTTP error! status: ${res.status}`);
   }
   const json = await res.json();
   return (json.data !== undefined ? json.data : json) as T;
@@ -38,6 +40,7 @@ export const performanceAppraisalService = {
     if (params?.status && params.status !== 'All') qs.set('status', params.status);
     if (params?.department && params.department !== 'All') qs.set('department', params.department);
     if (params?.cycle && params.cycle !== 'All') qs.set('cycle', params.cycle);
+    if (params?.employeeId) qs.set('employeeId', params.employeeId);
 
     const res = await fetch(`${BASE}?${qs.toString()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch appraisal records`);
@@ -65,6 +68,22 @@ export const performanceAppraisalService = {
     const item = await fetchJson<IPerformanceAppraisalRecord>(`${BASE}/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    });
+    return mapItem(item);
+  },
+
+  // Section 1: Regenerate AI Report
+  async generateAiReport(id: string): Promise<IPerformanceAppraisalRecord & { id: string }> {
+    const item = await fetchJson<IPerformanceAppraisalRecord>(`${BASE}/${id}/generate-ai-report`, {
+      method: 'POST',
+    });
+    return mapItem(item);
+  },
+
+  // Section 2: Sync Attendance & Tasks
+  async syncAttendanceAndTasks(id: string): Promise<IPerformanceAppraisalRecord & { id: string }> {
+    const item = await fetchJson<IPerformanceAppraisalRecord>(`${BASE}/${id}/attendance-sync`, {
+      method: 'POST',
     });
     return mapItem(item);
   },
@@ -135,6 +154,17 @@ export const performanceAppraisalService = {
     return mapItem(item);
   },
 
+  async add360Feedback(
+    id: string,
+    payload: Omit<IFeedback360Item, 'id' | 'date'>
+  ): Promise<IPerformanceAppraisalRecord & { id: string }> {
+    const item = await fetchJson<IPerformanceAppraisalRecord>(`${BASE}/${id}/feedback-360`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return mapItem(item);
+  },
+
   async addEndorsement(
     id: string,
     payload: Omit<IEndorsementItem, 'id' | 'date'> & { date?: string }
@@ -174,6 +204,36 @@ export const performanceAppraisalService = {
 
   async getReportsSummary(): Promise<AppraisalReportsSummary> {
     return fetchJson<AppraisalReportsSummary>(`${BASE}/reports/summary`);
+  },
+
+  async getExportData(id: string): Promise<any> {
+    return fetchJson<any>(`${BASE}/${id}/export`);
+  },
+
+  // --- Appraisal Cycles ---
+  async getCycles(): Promise<(IAppraisalCycle & { id: string })[]> {
+    const items = await fetchJson<IAppraisalCycle[]>(`${BASE}/cycles`);
+    return (items || []).map(mapItem);
+  },
+
+  async createCycle(payload: Partial<IAppraisalCycle>): Promise<IAppraisalCycle & { id: string }> {
+    const item = await fetchJson<IAppraisalCycle>(`${BASE}/cycles`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return mapItem(item);
+  },
+
+  async updateCycle(id: string, payload: Partial<IAppraisalCycle>): Promise<IAppraisalCycle & { id: string }> {
+    const item = await fetchJson<IAppraisalCycle>(`${BASE}/cycles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    return mapItem(item);
+  },
+
+  async deleteCycle(id: string): Promise<void> {
+    await fetchJson(`${BASE}/cycles/${id}`, { method: 'DELETE' });
   },
 };
 

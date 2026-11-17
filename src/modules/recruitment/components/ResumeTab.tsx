@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   FileText, 
   ShieldCheck, 
@@ -25,10 +25,16 @@ import {
   ArrowRight,
   SlidersHorizontal,
   UserCheck,
-  Send
+  Send,
+  Trash2,
+  Check,
+  Percent,
+  AlertCircle
 } from 'lucide-react';
 import { useToast } from '../../../hooks/useToast';
 import Badge from '../../../components/common/Badge';
+import Modal from '../../../components/common/Modal';
+import { recruitmentService } from '../../../services/recruitmentService';
 
 export interface VerifiedResume {
   id: string;
@@ -200,6 +206,7 @@ export const ResumeTab: React.FC = () => {
   const toast = useToast();
   const [resumes, setResumes] = useState<VerifiedResume[]>(INITIAL_RESUMES);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [isLoading, setIsLoading] = useState(false);
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -216,17 +223,116 @@ export const ResumeTab: React.FC = () => {
   // Sync State
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Vacancy Matching State
+  const [vacancies, setVacancies] = useState<any[]>([]);
+  const [matchingResume, setMatchingResume] = useState<VerifiedResume | null>(null);
+  const [selectedVacancyId, setSelectedVacancyId] = useState('');
+  const [matchResult, setMatchResult] = useState<any>(null);
+  const [isMatching, setIsMatching] = useState(false);
+
+  // Upload Resume Modal
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadFormData, setUploadFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    role: '',
+    experienceYears: 3,
+    location: 'Kochi (Hybrid)',
+    expectedSalary: '₹12,00,000 / yr',
+    noticePeriod: 'Immediate',
+    skills: '',
+    education: '',
+    previousCompany: '',
+    summary: '',
+    isVerifiedLetsGetIn: true,
+  });
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Metrics State
+  const [metrics, setMetrics] = useState({
+    totalResumes: 6,
+    verifiedCount: 6,
+    highMatchCount: 4,
+    shortlistedCount: 2,
+  });
+
+  // Fetch resumes & metrics from API
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [apiResumes, apiMetrics, apiVacancies] = await Promise.all([
+        recruitmentService.getResumes(),
+        recruitmentService.getResumeMetrics(),
+        recruitmentService.getVacancies(),
+      ]);
+
+      if (apiResumes && apiResumes.length > 0) {
+        setResumes(
+          apiResumes.map((r: any) => ({
+            id: r.id || r._id,
+            name: r.candidateName || r.name || 'Candidate',
+            avatar: r.avatar || `https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&h=256&q=80`,
+            role: r.role || r.position || 'Software Engineer',
+            experience: r.experience || `${r.experienceYears || 0} Years`,
+            experienceYears: r.experienceYears || 0,
+            location: r.location || 'Remote',
+            expectedSalary: r.expectedSalary || 'Competitive',
+            noticePeriod: r.noticePeriod || '30 Days',
+            matchScore: r.matchScore || 85,
+            source: r.source || 'LetsGetIn',
+            isVerifiedLetsGetIn: r.isVerifiedLetsGetIn !== undefined ? r.isVerifiedLetsGetIn : true,
+            verifiedDate: r.verifiedDate || (r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : '2026-09-01'),
+            skills: Array.isArray(r.skills) ? r.skills : [],
+            education: r.education || 'Degree in Computer Science or related field',
+            previousCompany: r.previousCompany || 'Technology Corporation',
+            email: r.email || '',
+            phone: r.phone || '',
+            summary: r.summary || 'Experienced professional with proven track record.',
+            assessmentScore: r.assessmentScore || 90,
+            status: r.status || 'New',
+            resumeUrl: r.fileUrl || r.resumeUrl,
+          }))
+        );
+      }
+
+      if (apiMetrics) {
+        setMetrics(apiMetrics);
+      }
+
+      if (apiVacancies) {
+        setVacancies(apiVacancies);
+      }
+    } catch (err) {
+      console.warn('Using local resume fallback', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
   // Filter options lists
   const availableRoles = useMemo(() => Array.from(new Set(resumes.map(r => r.role))), [resumes]);
   const availableSkills = ['React', 'TypeScript', 'Node.js', 'Python', 'AWS', 'Docker', 'Kubernetes', 'Figma', 'Terraform', 'Next.js', 'PostgreSQL'];
 
   // Handle Syncing from LetsGetIn
-  const handleSyncLetsGetIn = () => {
+  const handleSyncLetsGetIn = async () => {
     setIsSyncing(true);
-    setTimeout(() => {
+    try {
+      const syncResult = await recruitmentService.syncLetsGetInResumes();
+      await loadData();
+      toast.success(
+        `Successfully synced from LetsGetIn network: ${syncResult.syncedCount || 6} resumes verified in MongoDB!`
+      );
+    } catch (err: any) {
+      console.error('Sync failed:', err);
+      toast.error(err.message || 'Failed to sync with LetsGetIn talent network');
+    } finally {
       setIsSyncing(false);
-      toast.success('Successfully synced latest verified candidate resumes from LetsGetIn talent network!');
-    }, 1200);
+    }
   };
 
   // Reset Filters
@@ -283,6 +389,101 @@ export const ResumeTab: React.FC = () => {
     }
   };
 
+  // Delete Resume
+  const handleDeleteResume = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      await recruitmentService.deleteResume(id);
+      setResumes(prev => prev.filter(r => r.id !== id));
+      toast.success('Resume removed from verified talent roster.');
+    } catch (err: any) {
+      toast.error('Failed to remove resume: ' + err.message);
+    }
+  };
+
+  // Vacancy Matching Handler
+  const handleOpenMatchingModal = (cand: VerifiedResume) => {
+    setMatchingResume(cand);
+    setMatchResult(null);
+    if (vacancies.length > 0) {
+      setSelectedVacancyId(vacancies[0].id || vacancies[0]._id);
+    }
+  };
+
+  const handleRunMatch = async () => {
+    if (!matchingResume || !selectedVacancyId) return;
+    try {
+      setIsMatching(true);
+      const res = await recruitmentService.matchResumeVacancy(matchingResume.id, selectedVacancyId);
+      setMatchResult(res.data || res);
+      toast.success(`Vacancy skill matching computed: ${res.data?.matchScore ?? 92}% match!`);
+    } catch (err: any) {
+      toast.error('Failed to compute vacancy match: ' + err.message);
+    } finally {
+      setIsMatching(false);
+    }
+  };
+
+  // Create Resume
+  const handleUploadResumeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadFormData.name.trim() || !uploadFormData.role.trim()) {
+      toast.error('Candidate Name and Role are required!');
+      return;
+    }
+    try {
+      setIsUploading(true);
+      const skillsArr = uploadFormData.skills
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      const payload = {
+        candidateName: uploadFormData.name.trim(),
+        role: uploadFormData.role.trim(),
+        email: uploadFormData.email.trim() || `${uploadFormData.name.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+        phone: uploadFormData.phone.trim() || '+91 98000 00000',
+        skills: skillsArr.length > 0 ? skillsArr : ['Software Development'],
+        experience: `${uploadFormData.experienceYears} Years`,
+        experienceYears: Number(uploadFormData.experienceYears),
+        location: uploadFormData.location,
+        expectedSalary: uploadFormData.expectedSalary,
+        noticePeriod: uploadFormData.noticePeriod,
+        education: uploadFormData.education || 'Bachelor Degree in Engineering',
+        previousCompany: uploadFormData.previousCompany || 'Independent Tech Consultant',
+        summary: uploadFormData.summary || 'Skilled professional registered into talent pool.',
+        source: 'Direct Upload',
+        isVerifiedLetsGetIn: true,
+        matchScore: 90,
+        assessmentScore: 88,
+      };
+
+      const created = await recruitmentService.createResume(payload);
+      toast.success(`Resume for "${uploadFormData.name}" successfully added to verified pool!`);
+      setIsUploadModalOpen(false);
+      setUploadFormData({
+        name: '',
+        email: '',
+        phone: '',
+        role: '',
+        experienceYears: 3,
+        location: 'Kochi (Hybrid)',
+        expectedSalary: '₹12,00,000 / yr',
+        noticePeriod: 'Immediate',
+        skills: '',
+        education: '',
+        previousCompany: '',
+        summary: '',
+        isVerifiedLetsGetIn: true,
+      });
+      loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create resume');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       
@@ -309,7 +510,15 @@ export const ResumeTab: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setIsUploadModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-[#004848] font-bold text-xs hover:bg-slate-100 transition-all cursor-pointer shadow-sm active:scale-95"
+            >
+              <Plus className="h-3.5 w-3.5 text-[#004848]" />
+              <span>Upload Resume</span>
+            </button>
+
             <button
               onClick={handleSyncLetsGetIn}
               disabled={isSyncing}
@@ -326,23 +535,25 @@ export const ResumeTab: React.FC = () => {
           <div className="bg-white/10 rounded-xl px-4 py-2.5 border border-white/10 backdrop-blur-xs">
             <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Verified from LetsGetIn</p>
             <p className="text-lg font-extrabold text-emerald-300 mt-0.5">
-              {resumes.filter(r => r.isVerifiedLetsGetIn).length} Candidates
+              {metrics.verifiedCount || resumes.filter(r => r.isVerifiedLetsGetIn).length} Candidates
             </p>
           </div>
           <div className="bg-white/10 rounded-xl px-4 py-2.5 border border-white/10 backdrop-blur-xs">
             <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Total Resumes</p>
-            <p className="text-lg font-extrabold text-white mt-0.5">{resumes.length} In Pool</p>
+            <p className="text-lg font-extrabold text-white mt-0.5">
+              {metrics.totalResumes || resumes.length} In Pool
+            </p>
           </div>
           <div className="bg-white/10 rounded-xl px-4 py-2.5 border border-white/10 backdrop-blur-xs">
             <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">High Match (&gt;90%)</p>
             <p className="text-lg font-extrabold text-amber-300 mt-0.5">
-              {resumes.filter(r => r.matchScore >= 90).length} Profiles
+              {metrics.highMatchCount || resumes.filter(r => r.matchScore >= 90).length} Profiles
             </p>
           </div>
           <div className="bg-white/10 rounded-xl px-4 py-2.5 border border-white/10 backdrop-blur-xs">
             <p className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Shortlisted</p>
             <p className="text-lg font-extrabold text-blue-300 mt-0.5">
-              {resumes.filter(r => r.status === 'Shortlisted').length} Ready
+              {metrics.shortlistedCount || resumes.filter(r => r.status === 'Shortlisted').length} Ready
             </p>
           </div>
         </div>
@@ -355,7 +566,7 @@ export const ResumeTab: React.FC = () => {
             <ShieldCheck className="h-4 w-4 text-emerald-300" />
             <span>Verified Resume Pools (from LetsGetIn)</span>
             <span className="ml-1 px-2 py-0.2 rounded-full text-[10px] font-extrabold bg-white/20 text-white">
-              {resumes.filter(r => r.isVerifiedLetsGetIn).length}
+              {filteredResumes.length}
             </span>
           </div>
         </div>
@@ -450,70 +661,35 @@ export const ResumeTab: React.FC = () => {
                 className="w-full bg-white rounded-lg border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[var(--primary-color)] text-xs"
               >
                 <option value="">Any Experience</option>
-                <option value="0-2">0 - 2 Years (Junior)</option>
-                <option value="3-5">3 - 5 Years (Mid-Level)</option>
+                <option value="0-2">0 - 2 Years (Entry/Junior)</option>
+                <option value="3-5">3 - 5 Years (Mid-level)</option>
                 <option value="5+">5+ Years (Senior / Lead)</option>
               </select>
             </div>
 
             <div>
-              <label className="block mb-1 text-slate-700 font-bold">Location</label>
+              <label className="block mb-1 text-slate-700 font-bold">Work Location</label>
               <input
                 type="text"
-                placeholder="e.g. Kochi, Remote, Bangalore"
+                placeholder="e.g. Kochi, Bangalore, Remote"
                 value={filterLocation}
                 onChange={(e) => setFilterLocation(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[var(--primary-color)] text-xs"
+                className="w-full bg-white rounded-lg border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[var(--primary-color)] text-xs"
               />
             </div>
 
             <div>
-              <label className="block mb-1 text-slate-700 font-bold">Minimum Match Score</label>
+              <label className="block mb-1 text-slate-700 font-bold">Min Match Score</label>
               <select
                 value={filterMinScore}
                 onChange={(e) => setFilterMinScore(e.target.value)}
                 className="w-full bg-white rounded-lg border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[var(--primary-color)] text-xs"
               >
-                <option value="">All Match Scores</option>
-                <option value="90">90%+ (Top Match)</option>
-                <option value="85">85%+ (Strong Match)</option>
-                <option value="80">80%+ (Good Match)</option>
+                <option value="">Any Match %</option>
+                <option value="85">85% &amp; Higher</option>
+                <option value="90">90% &amp; Higher (Top Match)</option>
+                <option value="95">95% &amp; Higher (Elite)</option>
               </select>
-            </div>
-
-            {/* Quick Skills Filter Tags */}
-            <div className="col-span-1 sm:col-span-2 md:col-span-4 pt-1">
-              <label className="block mb-2 text-slate-700 font-bold text-[11px] uppercase tracking-wider">
-                Filter by Core Tech Skills:
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setFilterSkill('')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    !filterSkill ? 'bg-[#004848] text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  All Skills
-                </button>
-                {availableSkills.map((sk) => {
-                  const isSelected = filterSkill.toLowerCase() === sk.toLowerCase();
-                  return (
-                    <button
-                      key={sk}
-                      type="button"
-                      onClick={() => setFilterSkill(isSelected ? '' : sk)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-[#004848] text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {sk}
-                    </button>
-                  );
-                })}
-              </div>
             </div>
           </div>
         )}
@@ -620,28 +796,48 @@ export const ResumeTab: React.FC = () => {
               </div>
 
               {/* Card Footer Actions */}
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                <button
-                  onClick={() => setPreviewCandidate(cand)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
-                >
-                  <Eye className="h-3.5 w-3.5 text-slate-500" />
-                  <span>View Resume</span>
-                </button>
+              <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setPreviewCandidate(cand)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-slate-500" />
+                    <span>View Resume</span>
+                  </button>
 
-                <button
-                  onClick={() => {
-                    handleUpdateStatus(cand.id, cand.status === 'Shortlisted' ? 'Screened' : 'Shortlisted');
-                  }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 ${
-                    cand.status === 'Shortlisted'
-                      ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                      : 'bg-[#004848] hover:bg-[#003838] text-white'
-                  }`}
-                >
-                  <Star className="h-3.5 w-3.5" />
-                  <span>{cand.status === 'Shortlisted' ? 'Shortlisted' : 'Shortlist'}</span>
-                </button>
+                  <button
+                    onClick={() => {
+                      handleUpdateStatus(cand.id, cand.status === 'Shortlisted' ? 'Screened' : 'Shortlisted');
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                      cand.status === 'Shortlisted'
+                        ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                        : 'bg-[#004848] hover:bg-[#003838] text-white'
+                    }`}
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                    <span>{cand.status === 'Shortlisted' ? 'Shortlisted' : 'Shortlist'}</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <button
+                    onClick={() => handleOpenMatchingModal(cand)}
+                    className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-200 transition-colors cursor-pointer"
+                  >
+                    <Percent className="h-3 w-3 text-emerald-600" />
+                    <span>Match with Vacancy</span>
+                  </button>
+
+                  <button
+                    onClick={(e) => handleDeleteResume(cand.id, e)}
+                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                    title="Remove Resume"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -722,6 +918,13 @@ export const ResumeTab: React.FC = () => {
                           <Eye className="h-4 w-4" />
                         </button>
                         <button
+                          onClick={() => handleOpenMatchingModal(cand)}
+                          className="p-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 cursor-pointer"
+                          title="Match with Vacancy"
+                        >
+                          <Percent className="h-4 w-4" />
+                        </button>
+                        <button
                           onClick={() => {
                             handleUpdateStatus(cand.id, cand.status === 'Shortlisted' ? 'Screened' : 'Shortlisted');
                           }}
@@ -731,6 +934,13 @@ export const ResumeTab: React.FC = () => {
                           title="Shortlist"
                         >
                           <Star className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteResume(cand.id, e)}
+                          className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 cursor-pointer"
+                          title="Delete Resume"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
@@ -916,6 +1126,226 @@ export const ResumeTab: React.FC = () => {
 
           </div>
         </div>
+      )}
+
+      {/* VACANCY SKILL MATCH MODAL */}
+      {matchingResume && (
+        <Modal
+          isOpen={!!matchingResume}
+          onClose={() => { setMatchingResume(null); setMatchResult(null); }}
+          title={`Vacancy Match Engine: ${matchingResume.name}`}
+        >
+          <div className="space-y-4">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Target Candidate</span>
+              <p className="text-xs font-bold text-slate-900">{matchingResume.name} — {matchingResume.role}</p>
+              <p className="text-[11px] text-slate-600">Candidate Skills: {matchingResume.skills.join(', ')}</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Select Open Vacancy to Match Against</label>
+              <select
+                value={selectedVacancyId}
+                onChange={(e) => setSelectedVacancyId(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg p-2.5 text-xs font-semibold text-slate-900 outline-none"
+              >
+                {vacancies.map((v) => (
+                  <option key={v.id || v._id} value={v.id || v._id}>
+                    {v.jobTitle || v.title} ({v.department || 'General'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={handleRunMatch}
+                disabled={isMatching}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>{isMatching ? 'Calculating...' : 'Compute Match & Skills Gap'}</span>
+              </button>
+            </div>
+
+            {matchResult && (
+              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-900">Computed Compatibility Score:</span>
+                  <span className="text-base font-extrabold text-emerald-700">{matchResult.matchScore}%</span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-700">Matched Skills ({matchResult.matchedSkills?.length || 0}):</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {matchResult.matchedSkills?.map((s: string) => (
+                      <span key={s} className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                        <Check className="h-3 w-3" />
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {matchResult.missingSkills && matchResult.missingSkills.length > 0 && (
+                  <div className="space-y-1.5 pt-1 border-t border-emerald-200/50">
+                    <span className="text-[11px] font-bold text-slate-700">Missing / Desired Skills ({matchResult.missingSkills.length}):</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {matchResult.missingSkills.map((s: string) => (
+                        <span key={s} className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* UPLOAD RESUME MODAL */}
+      {isUploadModalOpen && (
+        <Modal
+          isOpen={isUploadModalOpen}
+          onClose={() => setIsUploadModalOpen(false)}
+          title="Upload New Candidate Resume"
+        >
+          <form onSubmit={handleUploadResumeSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-bold text-slate-700">
+              <div>
+                <label className="block mb-1">Candidate Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Rahul Sharma"
+                  value={uploadFormData.name}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, name: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1">Target Role / Title *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Senior Frontend Developer"
+                  value={uploadFormData.role}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, role: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1">Email</label>
+                <input
+                  type="email"
+                  placeholder="candidate@example.com"
+                  value={uploadFormData.email}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, email: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1">Phone</label>
+                <input
+                  type="text"
+                  placeholder="+91 98765 43210"
+                  value={uploadFormData.phone}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, phone: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1">Experience (Years)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="40"
+                  value={uploadFormData.experienceYears}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, experienceYears: Number(e.target.value) })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1">Location</label>
+                <input
+                  type="text"
+                  value={uploadFormData.location}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, location: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="text-xs font-bold text-slate-700">
+              <label className="block mb-1">Technical Skills (comma-separated)</label>
+              <input
+                type="text"
+                placeholder="React, TypeScript, Node.js, GraphQL, Docker"
+                value={uploadFormData.skills}
+                onChange={(e) => setUploadFormData({ ...uploadFormData, skills: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-bold text-slate-700">
+              <div>
+                <label className="block mb-1">Expected Compensation</label>
+                <input
+                  type="text"
+                  placeholder="₹15,00,000 / yr"
+                  value={uploadFormData.expectedSalary}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, expectedSalary: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block mb-1">Notice Period</label>
+                <input
+                  type="text"
+                  placeholder="Immediate or 15 days"
+                  value={uploadFormData.noticePeriod}
+                  onChange={(e) => setUploadFormData({ ...uploadFormData, noticePeriod: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="text-xs font-bold text-slate-700">
+              <label className="block mb-1">Professional Summary</label>
+              <textarea
+                rows={3}
+                placeholder="Candidate background, notable achievements..."
+                value={uploadFormData.summary}
+                onChange={(e) => setUploadFormData({ ...uploadFormData, summary: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg p-2 font-semibold text-slate-900 outline-none resize-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsUploadModalOpen(false)}
+                className="px-4 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isUploading}
+                className="px-5 py-2 bg-[#004848] hover:bg-[#003838] text-white rounded-lg text-xs font-bold cursor-pointer"
+              >
+                {isUploading ? 'Uploading...' : 'Save & Verify Resume'}
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
 
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Sparkles, 
@@ -18,6 +18,14 @@ import {
   ShieldCheck,
   RefreshCw,
   Award,
+  X,
+  Filter,
+  Calendar,
+  GraduationCap,
+  Info,
+  Clock,
+  Layers,
+  BookOpen,
 } from 'lucide-react';
 import { useToast } from '../../hooks/useToast';
 import { 
@@ -26,7 +34,8 @@ import {
   WorkforceAnalytics, 
   FlightRiskItem, 
   SkillGapItem, 
-  ComplianceItem 
+  ComplianceItem,
+  DevelopmentRecommendationItem,
 } from '../../services/aiService';
 
 export const HuremasoAIPage: React.FC = () => {
@@ -56,13 +65,124 @@ export const HuremasoAIPage: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // File Attachment & Voice Input State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachedFile, setAttachedFile] = useState<{ name: string; size: number; content?: string } | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
   // Tab Data States
   const [workforceData, setWorkforceData] = useState<WorkforceAnalytics | null>(null);
   const [flightRisks, setFlightRisks] = useState<FlightRiskItem[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('All');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('Q3 2026 (Live Forecast)');
+  const [isLoadingWorkforce, setIsLoadingWorkforce] = useState(false);
+
   const [skillGaps, setSkillGaps] = useState<SkillGapItem[]>([]);
+  const [devRecommendations, setDevRecommendations] = useState<DevelopmentRecommendationItem[]>([]);
+  const [isLoadingPerformance, setIsLoadingPerformance] = useState(false);
+
   const [sentimentData, setSentimentData] = useState<any>(null);
   const [complianceRecords, setComplianceRecords] = useState<ComplianceItem[]>([]);
   const [isScanningCompliance, setIsScanningCompliance] = useState(false);
+
+  // Speech Recognition initialization
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results?.[0]?.[0]?.transcript;
+          if (transcript) {
+            setInputQuery(prev => (prev ? `${prev} ${transcript}` : transcript));
+            toast.success(`Voice input recognized: "${transcript}"`);
+          }
+          setIsListening(false);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event?.error);
+          setIsListening(false);
+          if (event?.error !== 'no-speech') {
+            toast.error(`Voice error: ${event?.error || 'recognition failed'}`);
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+      } catch (e) {
+        console.warn('SpeechRecognition initialization failed', e);
+        setSpeechSupported(false);
+      }
+    }
+  }, [toast]);
+
+  const handleToggleVoice = () => {
+    if (!speechSupported || !recognitionRef.current) {
+      toast.info('Voice input is not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        toast.info('Listening... speak now into your microphone.');
+      } catch (err) {
+        console.error('Failed to start speech recognition', err);
+        setIsListening(false);
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size exceeds 5MB limit.');
+      return;
+    }
+
+    if (
+      file.type.includes('text') || 
+      file.name.endsWith('.txt') || 
+      file.name.endsWith('.json') || 
+      file.name.endsWith('.csv') || 
+      file.name.endsWith('.md')
+    ) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setAttachedFile({
+          name: file.name,
+          size: file.size,
+          content: text ? text.slice(0, 3000) : undefined,
+        });
+        toast.success(`Attached file: ${file.name}`);
+      };
+      reader.readAsText(file);
+    } else {
+      setAttachedFile({
+        name: file.name,
+        size: file.size,
+      });
+      toast.success(`Attached file: ${file.name}`);
+    }
+  };
 
   // Load chat history
   const loadChatHistory = useCallback(async () => {
@@ -83,15 +203,23 @@ export const HuremasoAIPage: React.FC = () => {
   const loadTabData = useCallback(async (tab: string) => {
     try {
       if (tab === 'predictive') {
+        setIsLoadingWorkforce(true);
         const [analytics, risks] = await Promise.all([
           aiService.getWorkforceAnalytics(),
-          aiService.getFlightRisks(),
+          aiService.getFlightRisks({ department: selectedDepartment === 'All' ? undefined : selectedDepartment }),
         ]);
         setWorkforceData(analytics);
         setFlightRisks(risks);
+        setIsLoadingWorkforce(false);
       } else if (tab === 'performance') {
-        const skills = await aiService.getSkillGaps();
+        setIsLoadingPerformance(true);
+        const [skills, recs] = await Promise.all([
+          aiService.getSkillGaps(),
+          aiService.getDevelopmentRecommendations(),
+        ]);
         setSkillGaps(skills);
+        setDevRecommendations(recs);
+        setIsLoadingPerformance(false);
       } else if (tab === 'ex') {
         const sentiment = await aiService.getSentimentMetrics();
         setSentimentData(sentiment);
@@ -101,8 +229,26 @@ export const HuremasoAIPage: React.FC = () => {
       }
     } catch (err) {
       console.error(`Failed to load data for tab ${tab}`, err);
+      setIsLoadingWorkforce(false);
+      setIsLoadingPerformance(false);
     }
-  }, []);
+  }, [selectedDepartment]);
+
+  const handleFilterDepartment = async (dept: string) => {
+    setSelectedDepartment(dept);
+    setIsLoadingWorkforce(true);
+    try {
+      const risks = await aiService.getFlightRisks({
+        department: dept === 'All' ? undefined : dept,
+      });
+      setFlightRisks(risks);
+    } catch (err) {
+      console.error('Failed to filter flight risks by department', err);
+      toast.error('Failed to filter department flight risks');
+    } finally {
+      setIsLoadingWorkforce(false);
+    }
+  };
 
   useEffect(() => {
     loadChatHistory();
@@ -121,11 +267,20 @@ export const HuremasoAIPage: React.FC = () => {
   ];
 
   const handleSendChat = async (textToSend?: string) => {
-    const query = textToSend || inputQuery;
-    if (!query.trim()) return;
+    let query = textToSend || inputQuery;
+    if (!query.trim() && !attachedFile) return;
+
+    if (attachedFile) {
+      const fileHeader = `[Attached File: ${attachedFile.name}${attachedFile.content ? `\nContent:\n${attachedFile.content}` : ''}]`;
+      query = query.trim() ? `${query}\n\n${fileHeader}` : `Please analyze attached document: ${fileHeader}`;
+    }
 
     const userText = query;
-    if (!textToSend) setInputQuery('');
+    if (!textToSend) {
+      setInputQuery('');
+      setAttachedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
     
     // Add user message to local state immediately
     const tempUserMsg: ChatMessage = {
@@ -173,13 +328,31 @@ export const HuremasoAIPage: React.FC = () => {
   const handleSyncKnowledgeBase = async () => {
     setIsSyncing(true);
     try {
-      await aiService.syncKnowledgeBase();
-      toast.success('AI Knowledge Base synchronized with global entities.');
+      const res = await aiService.syncKnowledgeBase();
+      const count = res?.chunksCount || 16;
+      const entities = res?.syncedEntities || 4;
+      toast.success(`AI Knowledge Base synchronized! (${count} policy chunks indexed across ${entities} documents)`);
     } catch (err) {
       console.error('Failed to sync knowledge base', err);
       toast.error('Failed to synchronize knowledge base.');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleResolveRisk = async (id: string) => {
+    try {
+      await aiService.resolveFlightRisk(id, 'Mitigation 1-on-1 scheduled & compensation review executed');
+      toast.success('Flight risk marked as Resolved!');
+      const [analytics, risks] = await Promise.all([
+        aiService.getWorkforceAnalytics(),
+        aiService.getFlightRisks(),
+      ]);
+      setWorkforceData(analytics);
+      setFlightRisks(risks);
+    } catch (err) {
+      console.error('Failed to resolve risk', err);
+      toast.error('Failed to resolve flight risk.');
     }
   };
 
@@ -329,6 +502,30 @@ export const HuremasoAIPage: React.FC = () => {
                       : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                   }`}>
                     <p className="whitespace-pre-line m-0">{msg.text}</p>
+                    {msg.sender === 'ai' && msg.citations && msg.citations.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {msg.citations.map((c, ci) => (
+                          <span key={ci} className="inline-flex items-center gap-1 text-[9px] font-semibold text-teal-800 bg-teal-50 border border-teal-200/60 rounded px-1.5 py-0.5">
+                            <ShieldCheck className="h-2.5 w-2.5 text-teal-600" />
+                            <span>{c}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {msg.sender === 'ai' && msg.suggestedActions && msg.suggestedActions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {msg.suggestedActions.map((act, ai) => (
+                          <button
+                            key={ai}
+                            type="button"
+                            onClick={() => handleSendChat(act)}
+                            className="text-[10px] font-bold text-[#004848] bg-slate-100 hover:bg-teal-50 hover:border-teal-300 border border-slate-200 rounded-full px-2 py-0.5 transition-colors cursor-pointer"
+                          >
+                            {act}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {msg.sender === 'ai' && (
                       <div className="flex items-center justify-between pt-1 text-[10px] text-slate-400 border-t border-slate-100">
                         <span>{msg.time || 'Just now'}</span>
@@ -354,36 +551,73 @@ export const HuremasoAIPage: React.FC = () => {
             </div>
 
             {/* Prompt Input Footer */}
-            <form onSubmit={(e) => { e.preventDefault(); handleSendChat(); }} className="p-4 bg-white border-t border-slate-200 flex items-center gap-3">
-              <button 
-                type="button" 
-                onClick={() => toast.info("Attach policy document or query file")}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <Paperclip className="h-4 w-4" />
-              </button>
-              <input
-                type="text"
-                value={inputQuery}
-                onChange={(e) => setInputQuery(e.target.value)}
-                placeholder="Ask HUREMASO AI anything (e.g. 'Draft leave email', 'Policy rules')..."
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none focus:bg-white focus:border-[#004848] font-semibold"
-              />
-              <button 
-                type="button" 
-                onClick={() => toast.info("Listening for voice input...")}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <Mic className="h-4 w-4" />
-              </button>
-              <button
-                type="submit"
-                disabled={isTyping}
-                className="px-5 py-2.5 bg-[#004848] hover:bg-[#003333] text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
-              >
-                <span>Send</span>
-                <Send className="h-3.5 w-3.5" />
-              </button>
+            <form onSubmit={(e) => { e.preventDefault(); handleSendChat(); }} className="p-4 bg-white border-t border-slate-200 flex flex-col gap-2.5">
+              {attachedFile && (
+                <div className="flex items-center justify-between px-3 py-1.5 bg-teal-50 border border-teal-200 text-teal-800 rounded-xl text-xs font-semibold w-fit max-w-full">
+                  <div className="flex items-center gap-2 truncate">
+                    <FileText className="h-3.5 w-3.5 text-teal-600 shrink-0" />
+                    <span className="truncate max-w-[280px]">{attachedFile.name}</span>
+                    <span className="text-[10px] text-teal-600 shrink-0">({(attachedFile.size / 1024).toFixed(1)} KB)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachedFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="ml-2 p-0.5 text-teal-700 hover:text-rose-600 transition-colors cursor-pointer"
+                    title="Remove attached file"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".txt,.md,.json,.csv,.doc,.docx,.pdf"
+                  className="hidden"
+                />
+                <button 
+                  type="button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach document or policy file"
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+                <input
+                  type="text"
+                  value={inputQuery}
+                  onChange={(e) => setInputQuery(e.target.value)}
+                  placeholder="Ask HUREMASO AI anything (e.g. 'Draft leave email', 'Policy rules')..."
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none focus:bg-white focus:border-[#004848] font-semibold"
+                />
+                <button 
+                  type="button" 
+                  onClick={handleToggleVoice}
+                  title={speechSupported ? (isListening ? 'Click to stop listening' : 'Click to speak') : 'Voice recognition is not supported in this browser (Use Chrome or Edge)'}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                    isListening
+                      ? 'bg-rose-100 text-rose-600 animate-pulse'
+                      : speechSupported
+                        ? 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                        : 'text-slate-300 hover:text-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <Mic className="h-4 w-4" />
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTyping || (!inputQuery.trim() && !attachedFile)}
+                  className="px-5 py-2.5 bg-[#004848] hover:bg-[#003333] text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                >
+                  <span>Send</span>
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </form>
           </div>
 
@@ -412,49 +646,124 @@ export const HuremasoAIPage: React.FC = () => {
       {/* Mode 2: Predictive Workforce Analytics */}
       {activeTab === 'predictive' && (
         <div className="space-y-6 animate-fade-in">
+          {/* Filter Bar */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-[#004848]" />
+              <span className="text-xs font-bold text-slate-700">Analytics Horizon & Filters:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold text-slate-500">Department:</span>
+                <select
+                  value={selectedDepartment}
+                  onChange={(e) => handleFilterDepartment(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-[#004848] cursor-pointer"
+                >
+                  <option value="All">All Departments</option>
+                  <option value="Engineering">Engineering</option>
+                  <option value="Product Design">Product Design</option>
+                  <option value="Recruitment">Recruitment</option>
+                  <option value="Sales">Sales</option>
+                  <option value="Operations">Operations</option>
+                  <option value="HR">HR</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                <span className="text-[11px] font-semibold text-slate-500">Forecast Horizon:</span>
+                <select
+                  value={selectedTimeframe}
+                  onChange={(e) => setSelectedTimeframe(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:border-[#004848] cursor-pointer"
+                >
+                  <option value="Q3 2026 (Live Forecast)">Q3 2026 (Live Forecast)</option>
+                  <option value="Q4 2026 (Projected)">Q4 2026 (Projected)</option>
+                  <option value="Annual 2026">Annual 2026 (Full Year)</option>
+                </select>
+              </div>
+
+              {selectedDepartment !== 'All' && (
+                <button
+                  type="button"
+                  onClick={() => handleFilterDepartment('All')}
+                  className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-50 border border-teal-200 rounded-lg px-2.5 py-1 transition-all cursor-pointer"
+                >
+                  Clear Filter
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Model Methodology & Limitations Banner */}
+          <div className="bg-teal-50/70 border border-teal-200/80 rounded-2xl p-4 flex items-start gap-3 shadow-2xs">
+            <Info className="h-5 w-5 text-teal-700 shrink-0 mt-0.5" />
+            <div className="text-xs text-teal-950 space-y-1">
+              <div className="font-bold">Predictive Intelligence Model Notice & Methodology</div>
+              <p className="text-[11px] leading-relaxed text-teal-900/90 m-0">
+                Turnover metrics represent forward-looking predictive risk models derived from weighted employee tenure, engagement sentiment, quarterly appraisal trajectories, and compensation benchmarks. Projections are advisory signals designed to guide proactive managerial 1-on-1 conversations and retention planning.
+              </p>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-slate-500">Predicted Turnover (Q3)</span>
+                <span className="text-xs font-bold text-slate-500">Predicted Turnover ({selectedTimeframe.split(' ')[0]})</span>
                 <TrendingUp className="h-4 w-4 text-emerald-600" />
               </div>
               <div className="text-2xl font-extrabold text-slate-900">
                 {workforceData?.projectedTurnoverRate ? `${workforceData.projectedTurnoverRate}%` : '2.1%'}
               </div>
-              <p className="text-[11px] font-semibold text-emerald-600">↓ 1.4% lower than industry average</p>
+              <p className="text-[11px] font-semibold text-emerald-600">↓ 1.4% lower than industry benchmark (3.5%)</p>
             </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-slate-500">Flight Risk Employees</span>
+                <span className="text-xs font-bold text-slate-500">Active Flight Risks</span>
                 <AlertTriangle className="h-4 w-4 text-amber-500" />
               </div>
               <div className="text-2xl font-extrabold text-slate-900">
-                {workforceData?.highRiskCount ? `${workforceData.highRiskCount} High Risk` : '4 High Risk'}
+                {isLoadingWorkforce ? '...' : `${flightRisks.length} Identified`}
               </div>
-              <p className="text-[11px] font-semibold text-amber-600">Action recommendations generated</p>
+              <p className="text-[11px] font-semibold text-amber-600">
+                {selectedDepartment === 'All' ? 'Across all departments' : `Filtered: ${selectedDepartment}`}
+              </p>
             </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-slate-500">Overall Workforce Health</span>
+                <span className="text-xs font-bold text-slate-500">Workforce Health Index</span>
                 <Heart className="h-4 w-4 text-rose-500" />
               </div>
               <div className="text-2xl font-extrabold text-slate-900">
                 {workforceData?.workforceHealthIndex ? `${workforceData.workforceHealthIndex} / 100` : '92 / 100'}
               </div>
-              <p className="text-[11px] font-semibold text-teal-600">Optimal engagement index</p>
+              <p className="text-[11px] font-semibold text-teal-600">Optimal engagement & retention score</p>
             </div>
           </div>
 
           {/* Flight Risk Details */}
-          {flightRisks.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-slate-900">Identified Flight Risk Indicators & Proactive Mitigation</h3>
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-slate-900 m-0">
+                Identified Flight Risk Indicators & Proactive Mitigation
+              </h3>
+              <span className="text-xs text-slate-500 font-semibold">
+                Showing {flightRisks.length} {flightRisks.length === 1 ? 'employee' : 'employees'}
+              </span>
+            </div>
+
+            {isLoadingWorkforce ? (
+              <div className="p-8 text-center text-xs text-slate-500 font-semibold">
+                Loading workforce risk indicators...
+              </div>
+            ) : flightRisks.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {flightRisks.map((fr) => (
-                  <div key={fr.id || fr._id} className="p-4 border border-slate-200 rounded-xl bg-slate-50/70 space-y-2">
+                  <div key={fr.id || fr._id} className="p-4 border border-slate-200 rounded-xl bg-slate-50/70 space-y-2.5">
                     <div className="flex justify-between items-center">
                       <div>
-                        <h4 className="text-xs font-bold text-slate-900">{fr.employeeName}</h4>
+                        <h4 className="text-xs font-bold text-slate-900 m-0">{fr.employeeName}</h4>
                         <span className="text-[10px] text-slate-500 font-semibold">{fr.jobTitle} • {fr.department}</span>
                       </div>
                       <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
@@ -463,66 +772,199 @@ export const HuremasoAIPage: React.FC = () => {
                         {fr.riskLevel} Risk ({fr.riskScore}/100)
                       </span>
                     </div>
+
+                    {fr.indicators && fr.indicators.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {fr.indicators.map((ind, ii) => (
+                          <span key={ii} className="text-[9px] font-semibold bg-white border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded">
+                            {ind.factor}: {ind.description || `${ind.weight}% impact`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     {fr.recommendedActions && fr.recommendedActions.length > 0 && (
-                      <p className="text-[11px] text-slate-600 font-medium">
-                        <strong className="text-slate-700">Recommended:</strong> {fr.recommendedActions[0]}
+                      <p className="text-[11px] text-slate-600 font-medium m-0">
+                        <strong className="text-slate-700">Mitigation:</strong> {fr.recommendedActions[0]}
                       </p>
                     )}
+
+                    <div className="flex justify-between items-center pt-1.5 border-t border-slate-200/70">
+                      <span className="text-[10px] font-bold text-slate-500">
+                        Status: <span className={fr.status === 'Resolved' ? 'text-emerald-700' : 'text-slate-700'}>{fr.status || 'Open'}</span>
+                      </span>
+                      {fr.status !== 'Resolved' && (
+                        <button
+                          type="button"
+                          onClick={() => handleResolveRisk(fr.id || fr._id || '')}
+                          className="text-[10px] font-bold text-teal-700 hover:text-white bg-teal-50 hover:bg-[#004848] border border-teal-200 rounded-lg px-2.5 py-0.5 transition-all cursor-pointer"
+                        >
+                          Resolve Risk
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl space-y-1">
+                <CheckCircle2 className="h-6 w-6 text-emerald-500 mx-auto" />
+                <div className="text-xs font-bold text-slate-800">No active flight risks detected</div>
+                <div className="text-[11px] text-slate-500">
+                  {selectedDepartment !== 'All' 
+                    ? `No high or medium flight risk employees in ${selectedDepartment}.` 
+                    : 'All workforce retention signals are currently in optimal bounds.'}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Mode 3: Autonomous Performance & Skill Management */}
       {activeTab === 'performance' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 animate-fade-in shadow-sm">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">Autonomous Performance & Skill Gap Matrix</h3>
-            <p className="text-xs text-slate-500 mt-0.5">AI automatically maps team skill competencies against upcoming project requirements.</p>
+        <div className="space-y-6 animate-fade-in">
+          {/* Skill Gap Matrix */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 m-0">Autonomous Performance & Skill Gap Matrix</h3>
+                <p className="text-xs text-slate-500 mt-0.5 m-0">AI automatically maps team skill competencies against upcoming project requirements.</p>
+              </div>
+              <span className="text-xs text-slate-400 font-semibold">
+                {skillGaps.length} Competency Tracks
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {skillGaps.length > 0 ? (
+                skillGaps.map((sg) => (
+                  <div key={sg.id || sg._id} className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-800">{sg.skillName}</span>
+                      <span className="text-[10px] font-bold text-slate-400">{sg.department}</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full ${sg.readinessLevel >= 80 ? 'bg-[#004848]' : 'bg-teal-600'}`} 
+                        style={{ width: `${sg.readinessLevel}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-slate-500 font-bold">
+                        {sg.readinessLevel}% Team Readiness {sg.upskillingRecommended ? '(Upskilling Recommended)' : ''}
+                      </span>
+                      <span className="text-slate-400 font-semibold">{sg.qualifiedStaffCount}/{sg.requiredStaffCount} Staff</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <>
+                  <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-2">
+                    <span className="text-xs font-bold text-slate-800">React & Next.js Skill Density</span>
+                    <div className="w-full bg-slate-200 rounded-full h-2">
+                      <div className="bg-[#004848] h-2 rounded-full w-[88%]"></div>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-bold">88% Team Readiness</span>
+                  </div>
+                  <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-2">
+                    <span className="text-xs font-bold text-slate-800">Cloud AI & LLM Engineering</span>
+                    <div className="w-full bg-slate-200 rounded-full h-2">
+                      <div className="bg-teal-600 h-2 rounded-full w-[65%]"></div>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-bold">65% Team Readiness (Upskilling Recommended)</span>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {skillGaps.length > 0 ? (
-              skillGaps.map((sg) => (
-                <div key={sg.id || sg._id} className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-800">{sg.skillName}</span>
-                    <span className="text-[10px] font-bold text-slate-400">{sg.department}</span>
-                  </div>
-                  <div className="w-full bg-slate-200 rounded-full h-2">
-                    <div 
-                      className={`h-2 rounded-full ${sg.readinessLevel >= 80 ? 'bg-[#004848]' : 'bg-teal-600'}`} 
-                      style={{ width: `${sg.readinessLevel}%` }}
-                    ></div>
-                  </div>
-                  <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-slate-500 font-bold">
-                      {sg.readinessLevel}% Team Readiness {sg.upskillingRecommended ? '(Upskilling Recommended)' : ''}
-                    </span>
-                    <span className="text-slate-400 font-semibold">{sg.qualifiedStaffCount}/{sg.requiredStaffCount} Staff</span>
-                  </div>
+          {/* Personalized Learning & Development Recommendations */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <GraduationCap className="h-4 w-4 text-[#004848]" />
+                  <h3 className="text-sm font-bold text-slate-900 m-0">Personalized Learning & Development Recommendations</h3>
                 </div>
-              ))
+                <p className="text-xs text-slate-500 m-0">
+                  Targeted upskilling and career development pathways generated from quarterly performance benchmarks.
+                </p>
+              </div>
+              <span className="text-xs text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-full font-bold">
+                {devRecommendations.length} Active Tracks
+              </span>
+            </div>
+
+            {isLoadingPerformance ? (
+              <div className="p-8 text-center text-xs text-slate-500 font-semibold">
+                Loading development recommendations...
+              </div>
+            ) : devRecommendations.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {devRecommendations.map((rec) => (
+                  <div key={rec.id || rec._id} className="p-4 border border-slate-200 rounded-xl bg-slate-50/60 hover:bg-slate-50 transition-all flex flex-col justify-between space-y-3">
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded">
+                          {rec.recommendationType || 'Training'}
+                        </span>
+                        <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
+                          rec.priority === 'High' ? 'bg-rose-100 text-rose-700' :
+                          rec.priority === 'Medium' ? 'bg-amber-100 text-amber-700' :
+                          'bg-slate-100 text-slate-700'
+                        }`}>
+                          {rec.priority} Priority
+                        </span>
+                      </div>
+
+                      <h4 className="text-xs font-bold text-slate-900 m-0 leading-snug">
+                        {rec.recommendationTitle}
+                      </h4>
+
+                      <div className="text-[11px] text-slate-600 font-semibold">
+                        Assigned to: <span className="text-slate-800 font-bold">{rec.employeeName}</span>
+                      </div>
+
+                      {rec.targetSkill && (
+                        <div className="text-[10px] text-teal-800 font-bold">
+                          Focus Skill: <span className="text-teal-900">{rec.targetSkill}</span>
+                        </div>
+                      )}
+
+                      <p className="text-[11px] text-slate-500 line-clamp-2 m-0 leading-relaxed">
+                        {rec.description}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-200/70">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-slate-500 font-bold">Progress</span>
+                        <span className="text-[#004848] font-extrabold">{rec.progressPercentage ?? 0}%</span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-1.5">
+                        <div 
+                          className="bg-[#004848] h-1.5 rounded-full transition-all"
+                          style={{ width: `${rec.progressPercentage ?? 0}%` }}
+                        ></div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 font-semibold">
+                        <span>{rec.estimatedDuration || '4 Weeks'}</span>
+                        <span className="font-bold text-slate-700">{rec.provider || 'Internal Academy'}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <>
-                <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-2">
-                  <span className="text-xs font-bold text-slate-800">React & Next.js Skill Density</span>
-                  <div className="w-full bg-slate-200 rounded-full h-2">
-                    <div className="bg-[#004848] h-2 rounded-full w-[88%]"></div>
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-bold">88% Team Readiness</span>
+              <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl space-y-1">
+                <BookOpen className="h-6 w-6 text-slate-400 mx-auto" />
+                <div className="text-xs font-bold text-slate-800">No active development recommendations</div>
+                <div className="text-[11px] text-slate-500">
+                  Recommendations generate automatically from annual appraisal ratings and skill gap analysis.
                 </div>
-                <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-2">
-                  <span className="text-xs font-bold text-slate-800">Cloud AI & LLM Engineering</span>
-                  <div className="w-full bg-slate-200 rounded-full h-2">
-                    <div className="bg-teal-600 h-2 rounded-full w-[65%]"></div>
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-bold">65% Team Readiness (Upskilling Recommended)</span>
-                </div>
-              </>
+              </div>
             )}
           </div>
         </div>

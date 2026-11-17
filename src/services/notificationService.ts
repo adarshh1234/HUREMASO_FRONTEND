@@ -1,4 +1,14 @@
-import { MessageLog } from '../types';
+export interface RecipientDeliveryItem {
+  recipientId: string;
+  name: string;
+  department: string;
+  contactAddress: string;
+  status: 'QUEUED' | 'SENT' | 'DELIVERED' | 'FAILED' | 'BOUNCED' | 'READ';
+  error?: string;
+  messageId?: string;
+  sentAt?: string;
+  readAt?: string;
+}
 
 export interface BackendNotification {
   id: string;
@@ -6,12 +16,51 @@ export interface BackendNotification {
   subject?: string;
   message: string;
   recipients: string;
-  recipientType?: string;
+  recipientType?: 'ALL_EMPLOYEES' | 'DEPARTMENT' | 'EMPLOYEES';
   departmentIds?: string[];
   employeeIds?: string[];
-  status: 'DRAFT' | 'SENT';
+  announcementCategory?: string;
+  status: 'DRAFT' | 'SENT' | 'PARTIALLY_SENT' | 'FAILED';
+  createdBy?: string;
+  recipientDeliveries?: RecipientDeliveryItem[];
+  totalRecipientsCount?: number;
+  validRecipientsCount?: number;
+  invalidRecipientsCount?: number;
+  sentCount?: number;
+  deliveredCount?: number;
+  failedCount?: number;
+  readCount?: number;
+  retryCount?: number;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface RecipientDepartment {
+  id: string;
+  name: string;
+  code: string;
+  employeeCount: number;
+}
+
+export interface RecipientEmployee {
+  id: string;
+  employeeId: string;
+  name: string;
+  department: string;
+  email: string;
+  phone: string;
+  isValidForChannel: boolean;
+  validationError?: string;
+}
+
+export interface RecipientsResponse {
+  departments: RecipientDepartment[];
+  employees: RecipientEmployee[];
+  summary: {
+    totalEmployees: number;
+    validCount: number;
+    invalidCount: number;
+  };
 }
 
 const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
@@ -30,6 +79,24 @@ export const notificationService = {
   },
 
   /**
+   * Fetch dynamic recipients and departments validated for a specific channel
+   */
+  async getRecipients(channelStr: string): Promise<RecipientsResponse> {
+    try {
+      const backendChannel = this.mapChannelToBackend(channelStr);
+      const res = await fetch(`${VITE_API_URL}/notifications/recipients?channel=${backendChannel}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to fetch recipients`);
+      }
+      const json = await res.json();
+      return json.data || { departments: [], employees: [], summary: { totalEmployees: 0, validCount: 0, invalidCount: 0 } };
+    } catch (err) {
+      console.error('[notificationService] Failed to fetch recipients:', err);
+      throw err;
+    }
+  },
+
+  /**
    * Fetch notifications from backend API with optional filtering
    */
   async getNotifications(params?: {
@@ -38,7 +105,7 @@ export const notificationService = {
     search?: string;
     page?: number;
     limit?: number;
-  }): Promise<{ data: BackendNotification[]; total: number }> {
+  }): Promise<{ data: BackendNotification[]; total: number; totalPages: number }> {
     try {
       const queryParams = new URLSearchParams();
       if (params?.channel) {
@@ -51,7 +118,7 @@ export const notificationService = {
         queryParams.append('search', params.search);
       }
       queryParams.append('page', String(params?.page || 1));
-      queryParams.append('limit', String(params?.limit || 50));
+      queryParams.append('limit', String(params?.limit || 10));
 
       const res = await fetch(`${VITE_API_URL}/notifications?${queryParams.toString()}`);
       if (!res.ok) {
@@ -61,9 +128,27 @@ export const notificationService = {
       return {
         data: json.data || [],
         total: json.pagination?.totalItems || json.data?.length || 0,
+        totalPages: json.pagination?.totalPages || 1,
       };
     } catch (err) {
       console.error('[notificationService] Backend request failed:', err);
+      throw err;
+    }
+  },
+
+  /**
+   * Get single notification by ID
+   */
+  async getNotificationById(id: string): Promise<BackendNotification> {
+    try {
+      const res = await fetch(`${VITE_API_URL}/notifications/${id}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to fetch notification details`);
+      }
+      const json = await res.json();
+      return json.data;
+    } catch (err) {
+      console.error('[notificationService] Failed to get notification by ID:', err);
       throw err;
     }
   },
@@ -79,17 +164,19 @@ export const notificationService = {
     recipientType?: 'ALL_EMPLOYEES' | 'DEPARTMENT' | 'EMPLOYEES';
     departmentIds?: string[];
     employeeIds?: string[];
+    announcementCategory?: string;
     status?: 'DRAFT' | 'SENT';
   }): Promise<BackendNotification> {
     const backendChannel = this.mapChannelToBackend(payload.channel);
     const body = {
       channel: backendChannel,
-      subject: payload.subject || 'No Subject',
+      subject: payload.subject || '',
       message: payload.message,
       recipients: payload.recipients || 'All Employees',
       recipientType: payload.recipientType || 'ALL_EMPLOYEES',
       departmentIds: payload.departmentIds || [],
       employeeIds: payload.employeeIds || [],
+      announcementCategory: payload.announcementCategory || '',
       status: 'DRAFT',
     };
 
@@ -122,12 +209,33 @@ export const notificationService = {
         method: 'POST',
       });
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: Failed to send draft`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || `HTTP ${res.status}: Failed to send draft`);
       }
       const json = await res.json();
       return json.data;
     } catch (err) {
       console.error('[notificationService] Send draft API call failed:', err);
+      throw err;
+    }
+  },
+
+  /**
+   * Retry failed deliveries on a notification
+   */
+  async retryNotification(id: string): Promise<BackendNotification> {
+    try {
+      const res = await fetch(`${VITE_API_URL}/notifications/${id}/retry`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || `HTTP ${res.status}: Failed to retry notification`);
+      }
+      const json = await res.json();
+      return json.data;
+    } catch (err) {
+      console.error('[notificationService] Retry notification API call failed:', err);
       throw err;
     }
   },
@@ -141,10 +249,70 @@ export const notificationService = {
         method: 'DELETE',
       });
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: Failed to delete draft`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || `HTTP ${res.status}: Failed to delete draft`);
       }
     } catch (err) {
       console.error('[notificationService] Delete draft API call failed:', err);
+      throw err;
+    }
+  },
+
+  /**
+   * In-App Employee notifications API
+   */
+  async getMyInAppNotifications(params?: { page?: number; limit?: number }): Promise<{
+    data: BackendNotification[];
+    total: number;
+    unreadCount: number;
+  }> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.page) queryParams.append('page', String(params.page));
+      if (params?.limit) queryParams.append('limit', String(params.limit));
+
+      const res = await fetch(`${VITE_API_URL}/notifications/my-notifications?${queryParams.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch in-app notifications`);
+      const json = await res.json();
+      return {
+        data: json.data || [],
+        total: json.pagination?.totalItems || 0,
+        unreadCount: json.pagination?.unreadCount || 0,
+      };
+    } catch (err) {
+      console.error('[notificationService] Failed to fetch my in-app notifications:', err);
+      throw err;
+    }
+  },
+
+  async markAsRead(id: string, recipientId?: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${VITE_API_URL}/notifications/my-notifications/${id}/read`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to mark notification as read`);
+      const json = await res.json();
+      return json.data?.updated ?? true;
+    } catch (err) {
+      console.error('[notificationService] Failed to mark as read:', err);
+      throw err;
+    }
+  },
+
+  async markAllAsRead(recipientId?: string): Promise<number> {
+    try {
+      const res = await fetch(`${VITE_API_URL}/notifications/my-notifications/read-all`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to mark all as read`);
+      const json = await res.json();
+      return json.data?.count ?? 0;
+    } catch (err) {
+      console.error('[notificationService] Failed to mark all as read:', err);
       throw err;
     }
   },

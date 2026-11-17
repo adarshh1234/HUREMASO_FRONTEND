@@ -2,166 +2,280 @@ const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api
 const BASE_URL = `${VITE_API_URL}/tasks`;
 
 export type TaskColumn = 'new-task' | 'scheduled' | 'in-progress' | 'completed';
+export type TaskPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
 export interface KanbanTask {
-  id: string | number;
+  id: string;
   _id?: string;
   title: string;
   type?: string;
   dueDate?: string;
+  startDate?: string;
   column: TaskColumn;
   description?: string;
-  priority?: 'Low' | 'Medium' | 'High';
-  order?: number;
+  priority?: TaskPriority;
+  assigneeId?: string;
+  assigneeName?: string;
+  assigneeAvatar?: string;
+  completedAt?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface TodoItem {
-  id: string | number;
+  id: string;
   _id?: string;
   title: string;
   category: string;
   completed: boolean;
+  completedAt?: string;
   dueDate: string;
-  priority?: 'Low' | 'Medium' | 'High';
+  priority?: string;
+  description?: string;
+  employeeId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface TaskCounts {
+  total: number;
+  newTask: number;
+  scheduled: number;
+  inProgress: number;
+  completed: number;
+}
+
+export interface TodoStats {
+  total: number;
+  completed: number;
+  pending: number;
+  percentage: number;
+}
+
+export interface SimpleEmployee {
+  id: string;
+  name: string;
+  jobTitle?: string;
+  department?: string;
+  avatar?: string;
+}
+
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('token') || localStorage.getItem('auth_token') || '';
+  const userId = localStorage.getItem('userId') || 'user-admin';
+  const userRole = localStorage.getItem('userRole') || 'hr-admin';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-user-id': userId,
+    'x-user-role': userRole,
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  return headers;
 }
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers: {
+      ...getAuthHeaders(),
+      ...options?.headers,
+    },
   });
+
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}));
     throw new Error(errorBody.message || `HTTP error! status: ${res.status}`);
   }
+
   const json = await res.json();
   return (json.data !== undefined ? json.data : json) as T;
 }
 
 export const taskService = {
   // ================= KANBAN TASKS =================
-  async getTasks(params?: { column?: string; type?: string; search?: string }): Promise<KanbanTask[]> {
-    try {
-      const query = new URLSearchParams();
-      if (params?.column) query.set('column', params.column);
-      if (params?.type && params.type !== 'All') query.set('type', params.type);
-      if (params?.search) query.set('search', params.search);
+  async getTasks(params?: {
+    column?: string;
+    type?: string;
+    priority?: string;
+    search?: string;
+    assigneeId?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }): Promise<KanbanTask[]> {
+    const query = new URLSearchParams();
+    if (params?.column && params.column !== 'all') query.set('column', params.column);
+    if (params?.type && params.type !== 'All') query.set('type', params.type);
+    if (params?.priority && params.priority !== 'All') query.set('priority', params.priority);
+    if (params?.search && params.search.trim()) query.set('search', params.search.trim());
+    if (params?.assigneeId) query.set('assigneeId', params.assigneeId);
+    if (params?.sortBy) query.set('sortBy', params.sortBy);
+    if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
 
-      const qs = query.toString();
-      const data = await fetchJson<KanbanTask[]>(`${BASE_URL}${qs ? `?${qs}` : ''}`);
-      if (Array.isArray(data)) {
-        return data.map((t) => ({
-          ...t,
-          id: t._id || t.id,
-        }));
-      }
-    } catch (err) {
-      console.warn('Failed to fetch tasks from API, falling back to local defaults', err);
+    const qs = query.toString();
+    const data = await fetchJson<KanbanTask[]>(`${BASE_URL}${qs ? `?${qs}` : ''}`);
+    if (Array.isArray(data)) {
+      return data.map((t) => ({
+        ...t,
+        id: (t._id || t.id || '').toString(),
+      }));
     }
-    return [
-      { id: 1, title: 'Prepare Calculus quiz questions', column: 'new-task', type: 'Operational' },
-      { id: 2, title: 'Draft syllabus for Quantum Physics', column: 'new-task', type: 'Technical' },
-      { id: 3, title: 'Verify Aisha Kumar Background PCC Documents', column: 'new-task', type: 'Hiring' },
-      { id: 4, title: 'Review term exams schedule', column: 'scheduled', type: 'Strategic' },
-      { id: 5, title: 'Schedule Q3 All-Hands Townhall Meeting', column: 'scheduled', type: 'Operational' },
-      { id: 6, title: 'Onboard new math co-teacher', column: 'in-progress', type: 'Hiring' },
-      { id: 7, title: 'Draft Executive Severance Letter for Restructure', column: 'in-progress', type: 'Financial' },
-      { id: 8, title: 'Submit Q3 budget analysis', column: 'completed', type: 'Financial' },
-      { id: 9, title: 'Complete Employee App Travel Documents Feature Test', column: 'completed', type: 'Technical' },
-    ];
+    return [];
   },
 
-  async createTask(task: Omit<KanbanTask, 'id' | '_id'>): Promise<KanbanTask> {
+  async getTaskById(id: string): Promise<KanbanTask> {
+    const data = await fetchJson<KanbanTask>(`${BASE_URL}/${id}`);
+    return {
+      ...data,
+      id: (data._id || data.id || '').toString(),
+    };
+  },
+
+  async createTask(task: Partial<KanbanTask>): Promise<KanbanTask> {
     const data = await fetchJson<KanbanTask>(BASE_URL, {
       method: 'POST',
       body: JSON.stringify(task),
     });
     return {
       ...data,
-      id: data._id || data.id,
+      id: (data._id || data.id || '').toString(),
     };
   },
 
-  async updateTask(id: string | number, task: Partial<KanbanTask>): Promise<KanbanTask> {
+  async updateTask(id: string, task: Partial<KanbanTask>): Promise<KanbanTask> {
     const data = await fetchJson<KanbanTask>(`${BASE_URL}/${id}`, {
       method: 'PUT',
       body: JSON.stringify(task),
     });
     return {
       ...data,
-      id: data._id || data.id,
+      id: (data._id || data.id || '').toString(),
     };
   },
 
-  async moveTask(id: string | number, column: TaskColumn, order?: number): Promise<KanbanTask> {
+  async moveTask(id: string, column: TaskColumn): Promise<KanbanTask> {
     const data = await fetchJson<KanbanTask>(`${BASE_URL}/${id}/move`, {
       method: 'PATCH',
-      body: JSON.stringify({ column, order }),
+      body: JSON.stringify({ column }),
     });
     return {
       ...data,
-      id: data._id || data.id,
+      id: (data._id || data.id || '').toString(),
     };
   },
 
-  async deleteTask(id: string | number): Promise<void> {
+  async deleteTask(id: string): Promise<void> {
     await fetchJson<void>(`${BASE_URL}/${id}`, {
       method: 'DELETE',
     });
   },
 
-  // ================= TODOS =================
-  async getTodos(params?: { category?: string; completed?: boolean; search?: string }): Promise<TodoItem[]> {
-    try {
-      const query = new URLSearchParams();
-      if (params?.category && params.category !== 'All') query.set('category', params.category);
-      if (params?.completed !== undefined) query.set('completed', String(params.completed));
-      if (params?.search) query.set('search', params.search);
-
-      const qs = query.toString();
-      const data = await fetchJson<TodoItem[]>(`${BASE_URL}/todos${qs ? `?${qs}` : ''}`);
-      if (Array.isArray(data)) {
-        return data.map((td) => ({
-          ...td,
-          id: td._id || td.id,
-        }));
-      }
-    } catch (err) {
-      console.warn('Failed to fetch todos from API, falling back to local defaults', err);
-    }
-    return [
-      { id: 101, title: 'Approve September Monthly Payroll OneTap Disbursement', category: 'Payroll', completed: true, dueDate: 'Today' },
-      { id: 102, title: 'Conduct Exit Interview for Senior Frontend Engineer', category: 'Off-Boarding', completed: false, dueDate: 'Tomorrow' },
-      { id: 103, title: 'Issue Repatriation Flight Ticket Voucher', category: 'Off-Boarding', completed: false, dueDate: 'Sept 06' },
-      { id: 104, title: 'Publish Q3 Internal HR Newsletter & Events Schedule', category: 'Events', completed: true, dueDate: 'Aug 31' },
-      { id: 105, title: 'Audit YubiKey Hardware Security Token Distribution', category: 'Compliance', completed: true, dueDate: 'Aug 28' },
-    ];
+  async getTaskCounts(): Promise<TaskCounts> {
+    return await fetchJson<TaskCounts>(`${BASE_URL}/counts`);
   },
 
-  async createTodo(todo: Omit<TodoItem, 'id' | '_id'>): Promise<TodoItem> {
+  // ================= TODOS =================
+  async getTodos(params?: {
+    category?: string;
+    completed?: boolean;
+    priority?: string;
+    search?: string;
+  }): Promise<TodoItem[]> {
+    const query = new URLSearchParams();
+    if (params?.category && params.category !== 'All') query.set('category', params.category);
+    if (params?.completed !== undefined) query.set('completed', String(params.completed));
+    if (params?.priority && params.priority !== 'All') query.set('priority', params.priority);
+    if (params?.search && params.search.trim()) query.set('search', params.search.trim());
+
+    const qs = query.toString();
+    const data = await fetchJson<TodoItem[]>(`${BASE_URL}/todos${qs ? `?${qs}` : ''}`);
+    if (Array.isArray(data)) {
+      return data.map((td) => ({
+        ...td,
+        id: (td._id || td.id || '').toString(),
+      }));
+    }
+    return [];
+  },
+
+  async getTodoById(id: string): Promise<TodoItem> {
+    const data = await fetchJson<TodoItem>(`${BASE_URL}/todos/${id}`);
+    return {
+      ...data,
+      id: (data._id || data.id || '').toString(),
+    };
+  },
+
+  async createTodo(todo: Partial<TodoItem>): Promise<TodoItem> {
     const data = await fetchJson<TodoItem>(`${BASE_URL}/todos`, {
       method: 'POST',
       body: JSON.stringify(todo),
     });
     return {
       ...data,
-      id: data._id || data.id,
+      id: (data._id || data.id || '').toString(),
     };
   },
 
-  async toggleTodo(id: string | number): Promise<TodoItem> {
-    const data = await fetchJson<TodoItem>(`${BASE_URL}/todos/${id}/toggle`, {
-      method: 'PATCH',
+  async updateTodo(id: string, todo: Partial<TodoItem>): Promise<TodoItem> {
+    const data = await fetchJson<TodoItem>(`${BASE_URL}/todos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(todo),
     });
     return {
       ...data,
-      id: data._id || data.id,
+      id: (data._id || data.id || '').toString(),
     };
   },
 
-  async deleteTodo(id: string | number): Promise<void> {
+  async toggleTodo(id: string, completed?: boolean): Promise<TodoItem> {
+    const data = await fetchJson<TodoItem>(`${BASE_URL}/todos/${id}/toggle`, {
+      method: 'PATCH',
+      body: JSON.stringify(completed !== undefined ? { completed } : {}),
+    });
+    return {
+      ...data,
+      id: (data._id || data.id || '').toString(),
+    };
+  },
+
+  async deleteTodo(id: string): Promise<void> {
     await fetchJson<void>(`${BASE_URL}/todos/${id}`, {
       method: 'DELETE',
     });
+  },
+
+  async getTodoStats(): Promise<TodoStats> {
+    return await fetchJson<TodoStats>(`${BASE_URL}/todos/stats`);
+  },
+
+  // ================= EMPLOYEES HELPER =================
+  async getEmployees(): Promise<SimpleEmployee[]> {
+    try {
+      const data = await fetchJson<any[]>(`${VITE_API_URL}/employees?limit=100`);
+      if (Array.isArray(data)) {
+        return data.map((emp) => ({
+          id: (emp._id || emp.id || '').toString(),
+          name: `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || emp.name || 'Unnamed Employee',
+          jobTitle: emp.jobTitle || emp.position,
+          department: emp.department,
+          avatar: emp.avatar,
+        }));
+      }
+    } catch (err) {
+      console.warn('Could not fetch employees for task assignment, using fallbacks');
+    }
+    return [
+      { id: 'emp-1', name: 'Elena Rostova', jobTitle: 'Principal Architect', department: 'Engineering' },
+      { id: 'emp-2', name: 'Marcus Vance', jobTitle: 'Staff Platform Engineer', department: 'Cloud Infra' },
+      { id: 'emp-3', name: 'Sarah Joseph', jobTitle: 'VP People Operations', department: 'Human Resources' },
+      { id: 'emp-4', name: 'Carlos Gomez', jobTitle: 'Senior DevOps Engineer', department: 'Engineering' },
+      { id: 'emp-5', name: 'Michael Chang', jobTitle: 'Chief Legal Officer', department: 'Legal & Compliance' },
+    ];
   },
 };

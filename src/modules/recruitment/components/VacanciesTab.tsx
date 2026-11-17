@@ -19,8 +19,12 @@ interface VacancyDisplayItem {
   date: string;
   status: string;
   count: number;
+  filledPositions?: number;
+  remainingPositions?: number;
   description?: string;
   requirements?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export const VacanciesTab: React.FC = () => {
@@ -33,11 +37,12 @@ export const VacanciesTab: React.FC = () => {
   const [vacFilterStatus, setVacFilterStatus] = useState('');
 
   // Data States
-  const [vacanciesList, setVacanciesList] = useState<VacancyDisplayItem[]>([
-    { id: 'v1', vacancy: 'Node Js', title: 'Node js developer', manager: 'Amal Benny', date: '2026-03-29', status: 'Available', count: 2, description: 'Responsible for server-side logic and database management.', requirements: 'Node.js, Express, MongoDB, 3+ years experience' },
-    { id: 'v2', vacancy: 'React Dev', title: 'Senior Frontend Engineer', manager: 'Sarah Joseph', date: '2026-03-29', status: 'Available', count: 1, description: 'Lead frontend UI/UX architecture and web performance.', requirements: 'React, TypeScript, Tailwind CSS, 5+ years experience' },
-  ]);
+  const [vacanciesList, setVacanciesList] = useState<VacancyDisplayItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // External Reference Data
   const [jobTitles, setJobTitles] = useState<JobTitleRecord[]>([]);
@@ -49,6 +54,8 @@ export const VacanciesTab: React.FC = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedVacancy, setSelectedVacancy] = useState<VacancyDisplayItem | null>(null);
+  const [vacancyPipeline, setVacancyPipeline] = useState<any>(null);
+  const [isLoadingPipeline, setIsLoadingPipeline] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form State
@@ -65,26 +72,30 @@ export const VacanciesTab: React.FC = () => {
   const [formData, setFormData] = useState(initialFormState);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  // Fetch Vacancies
+  // Fetch Vacancies from MongoDB
   const fetchVacancies = async () => {
     setIsLoading(true);
     try {
       const data = await recruitmentService.getVacancies();
-      if (data && data.length > 0) {
-        setVacanciesList(data.map(v => ({
+      setVacanciesList(
+        data.map((v) => ({
           id: v.id,
           vacancy: v.department || v.jobTitle || 'General',
           title: v.jobTitle || 'Position',
           manager: v.hiringManager || 'HR Manager',
-          date: v.datePosted || new Date().toISOString().split('T')[0],
+          date: v.datePosted || (v.createdAt ? new Date(v.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
           status: v.status || 'Available',
           count: v.noOfOpenings || 1,
+          filledPositions: (v as any).filledPositions || 0,
+          remainingPositions: (v as any).remainingPositions ?? (v.noOfOpenings || 1),
           description: v.description || '',
-          requirements: v.requirements || ''
-        })));
-      }
-    } catch {
-      // Keep existing list fallback
+          requirements: v.requirements || '',
+          createdAt: v.createdAt,
+          updatedAt: v.updatedAt,
+        }))
+      );
+    } catch (err: any) {
+      console.error('Failed to load vacancies:', err);
     } finally {
       setIsLoading(false);
     }
@@ -138,7 +149,7 @@ export const VacanciesTab: React.FC = () => {
     return Array.from(new Set([...listManagers, ...refEmps]));
   }, [vacanciesList, employees]);
 
-  // Filtered List
+  // Filtered List & Pagination
   const filteredVacancies = useMemo(() => {
     return vacanciesList.filter(v => {
       const matchJobTitle = !vacFilterJobTitle || v.title.toLowerCase().includes(vacFilterJobTitle.toLowerCase());
@@ -148,6 +159,13 @@ export const VacanciesTab: React.FC = () => {
       return matchJobTitle && matchVacancy && matchManager && matchStatus;
     });
   }, [vacanciesList, vacFilterJobTitle, vacFilterVacancy, vacFilterManager, vacFilterStatus]);
+
+  const paginatedVacancies = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredVacancies.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredVacancies, currentPage, itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredVacancies.length / itemsPerPage));
 
   const handleReset = () => {
     setVacFilterJobTitle('');
@@ -162,9 +180,19 @@ export const VacanciesTab: React.FC = () => {
     setIsAddModalOpen(true);
   };
 
-  const openViewModal = (vac: VacancyDisplayItem) => {
+  const openViewModal = async (vac: VacancyDisplayItem) => {
     setSelectedVacancy(vac);
+    setVacancyPipeline(null);
     setIsViewModalOpen(true);
+    setIsLoadingPipeline(true);
+    try {
+      const pipeline = await recruitmentService.getVacancyPipeline(vac.id);
+      setVacancyPipeline(pipeline);
+    } catch (err) {
+      console.error('Failed to load vacancy pipeline:', err);
+    } finally {
+      setIsLoadingPipeline(false);
+    }
   };
 
   const openEditModal = (vac: VacancyDisplayItem) => {
@@ -453,7 +481,7 @@ export const VacanciesTab: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-1.5">
-            {filteredVacancies.map((vac) => (
+            {paginatedVacancies.map((vac) => (
               <div
                 key={vac.id}
                 className="grid grid-cols-7 items-center bg-white border border-slate-200 rounded-lg py-2.5 px-4 shadow-sm text-xs font-bold text-slate-800 hover:border-slate-300 transition-colors"
@@ -467,7 +495,7 @@ export const VacanciesTab: React.FC = () => {
                   {vac.status && (
                     <Badge 
                       variant={
-                        vac.status.toLowerCase() === 'available' || vac.status.toLowerCase() === 'active' 
+                        vac.status.toLowerCase() === 'available' || vac.status.toLowerCase() === 'active' || vac.status.toLowerCase() === 'open'
                           ? 'success' 
                           : vac.status.toLowerCase() === 'draft' 
                           ? 'warning' 
@@ -480,7 +508,12 @@ export const VacanciesTab: React.FC = () => {
                   )}
                 </div>
 
-                <span className="text-slate-500 font-semibold">{vac.count}</span>
+                <div className="flex flex-col">
+                  <span className="text-slate-800 font-bold">{vac.count} Position{vac.count === 1 ? '' : 's'}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    Filled: {vac.filledPositions || 0} • Rem: {vac.remainingPositions ?? vac.count}
+                  </span>
+                </div>
 
                 <div className="flex justify-end gap-2.5">
                   <button
@@ -504,11 +537,31 @@ export const VacanciesTab: React.FC = () => {
         )}
 
         <div className="flex justify-center items-center gap-2 pt-2">
-          <button className="p-1 border border-slate-200 rounded bg-white hover:bg-slate-50 text-slate-500">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="p-1 border border-slate-200 rounded bg-white hover:bg-slate-50 text-slate-500 disabled:opacity-40 cursor-pointer"
+          >
             <ChevronLeft className="h-3 w-3" />
           </button>
-          <button className="px-2.5 py-0.5 text-xs font-bold border rounded bg-blue-50 text-[#0473b8] border-blue-200 font-extrabold">1</button>
-          <button className="p-1 border border-slate-200 rounded bg-white hover:bg-slate-50 text-slate-500">
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrentPage(i + 1)}
+              className={`px-2.5 py-0.5 text-xs font-bold border rounded cursor-pointer ${
+                currentPage === i + 1
+                  ? 'bg-blue-50 text-[#0473b8] border-blue-200 font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="p-1 border border-slate-200 rounded bg-white hover:bg-slate-50 text-slate-500 disabled:opacity-40 cursor-pointer"
+          >
             <ChevronRight className="h-3 w-3" />
           </button>
         </div>
@@ -1009,11 +1062,50 @@ export const VacanciesTab: React.FC = () => {
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 uppercase block">Status</span>
                   <div className="mt-1">
-                    <Badge variant={selectedVacancy.status.toLowerCase() === 'available' || selectedVacancy.status.toLowerCase() === 'active' ? 'success' : 'default'} size="sm">
+                    <Badge variant={selectedVacancy.status.toLowerCase() === 'available' || selectedVacancy.status.toLowerCase() === 'active' || selectedVacancy.status.toLowerCase() === 'open' ? 'success' : 'default'} size="sm">
                       {selectedVacancy.status}
                     </Badge>
                   </div>
                 </div>
+              </div>
+
+              {/* Recruitment Pipeline Summary */}
+              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                <span className="text-[11px] font-extrabold text-[#0473b8] uppercase tracking-wider block mb-2.5">
+                  Recruitment Pipeline &amp; Openings
+                </span>
+                {isLoadingPipeline ? (
+                  <div className="py-2 text-center text-xs text-slate-400">Loading pipeline statistics...</div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
+                    <div className="bg-white p-2 rounded-lg border border-blue-100/80 shadow-2xs">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Applicants</span>
+                      <span className="text-sm font-extrabold text-slate-800">{vacancyPipeline?.totalApplicants ?? 0}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-blue-100/80 shadow-2xs">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Shortlisted</span>
+                      <span className="text-sm font-extrabold text-[#0473b8]">{vacancyPipeline?.stages?.shortlisted ?? 0}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-blue-100/80 shadow-2xs">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Interview</span>
+                      <span className="text-sm font-extrabold text-amber-600">{vacancyPipeline?.stages?.interview ?? 0}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-blue-100/80 shadow-2xs">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Selected</span>
+                      <span className="text-sm font-extrabold text-emerald-600">{(vacancyPipeline?.stages?.offered || 0) + (vacancyPipeline?.stages?.hired || 0)}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-blue-100/80 shadow-2xs">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Rejected</span>
+                      <span className="text-sm font-extrabold text-rose-500">{vacancyPipeline?.stages?.rejected ?? 0}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-blue-100/80 shadow-2xs">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Remaining</span>
+                      <span className="text-sm font-extrabold text-purple-600">
+                        {vacancyPipeline?.remainingPositions ?? selectedVacancy.remainingPositions ?? selectedVacancy.count}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {selectedVacancy.description && (
@@ -1031,6 +1123,18 @@ export const VacanciesTab: React.FC = () => {
                   <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200 whitespace-pre-line leading-relaxed">
                     {selectedVacancy.requirements}
                   </p>
+                </div>
+              )}
+
+              {/* History / Timestamps */}
+              {(selectedVacancy.createdAt || selectedVacancy.updatedAt) && (
+                <div className="pt-2 border-t border-slate-100 flex justify-between text-[10px] text-slate-400">
+                  {selectedVacancy.createdAt && (
+                    <span>Created: {new Date(selectedVacancy.createdAt).toLocaleDateString()}</span>
+                  )}
+                  {selectedVacancy.updatedAt && (
+                    <span>Last Modified: {new Date(selectedVacancy.updatedAt).toLocaleDateString()}</span>
+                  )}
                 </div>
               )}
             </div>

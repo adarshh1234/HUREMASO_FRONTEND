@@ -19,6 +19,7 @@ export interface Candidate {
 export interface Vacancy {
   id: string;
   jobTitle: string;
+  title?: string;
   hiringManager: string;
   datePosted: string;
   status: 'Available' | 'Closed' | 'Active' | 'Draft' | string;
@@ -30,4 +31,8 @@ export interface Vacancy {
   maxSalary?: number;
   experienceLevel?: string;
   requiredQualifications?: string;
+  filledPositions?: number;
+  remainingPositions?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }

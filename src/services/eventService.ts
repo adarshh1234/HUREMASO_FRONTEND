@@ -1,5 +1,6 @@
 import {
   ICompanyEvent,
+  IEventTask,
   ISupportEvent,
   IEventsNewsletter,
   IEventsBudgetItem,
@@ -39,6 +40,7 @@ export const eventService = {
     if (params?.search) qs.set('search', params.search);
     if (params?.status && params.status !== 'All') qs.set('status', params.status);
     if (params?.eventType && params.eventType !== 'All') qs.set('eventType', params.eventType);
+    if (params?.category && params.category !== 'All') qs.set('category', params.category);
     if (params?.department && params.department !== 'All') qs.set('department', params.department);
 
     const res = await fetch(`${BASE}?${qs.toString()}`);
@@ -74,6 +76,34 @@ export const eventService = {
   async deleteEvent(id: string): Promise<boolean> {
     await fetchJson(`${BASE}/${id}`, { method: 'DELETE' });
     return true;
+  },
+
+  // Event Tasks
+  async addTask(eventId: string, task: Partial<IEventTask>): Promise<ICompanyEvent & { id: string }> {
+    const item = await fetchJson<ICompanyEvent>(`${BASE}/${eventId}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify(task),
+    });
+    return mapItem(item);
+  },
+
+  async updateTask(
+    eventId: string,
+    taskId: string,
+    updates: Partial<IEventTask>
+  ): Promise<ICompanyEvent & { id: string }> {
+    const item = await fetchJson<ICompanyEvent>(`${BASE}/${eventId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    return mapItem(item);
+  },
+
+  async deleteTask(eventId: string, taskId: string): Promise<ICompanyEvent & { id: string }> {
+    const item = await fetchJson<ICompanyEvent>(`${BASE}/${eventId}/tasks/${taskId}`, {
+      method: 'DELETE',
+    });
+    return mapItem(item);
   },
 
   // Support Events
@@ -131,6 +161,22 @@ export const eventService = {
     await fetchJson(`${BASE}/newsletters/${id}`, { method: 'DELETE' });
   },
 
+  async likeNewsletter(id: string, employeeId?: string): Promise<IEventsNewsletter & { id: string }> {
+    const item = await fetchJson<IEventsNewsletter>(`${BASE}/newsletters/${id}/like`, {
+      method: 'POST',
+      body: JSON.stringify({ employeeId }),
+    });
+    return mapItem(item);
+  },
+
+  async incrementNewsletterReads(id: string): Promise<IEventsNewsletter & { id: string }> {
+    const item = await fetchJson<IEventsNewsletter>(`${BASE}/newsletters/${id}/read`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    return mapItem(item);
+  },
+
   // Budgets
   async getBudgets(): Promise<(IEventsBudgetItem & { id: string })[]> {
     const items = await fetchJson<IEventsBudgetItem[]>(`${BASE}/budgets`);
@@ -155,6 +201,14 @@ export const eventService = {
 
   async deleteBudget(id: string): Promise<void> {
     await fetchJson(`${BASE}/budgets/${id}`, { method: 'DELETE' });
+  },
+
+  async recordExpense(budgetId: string, expense: any): Promise<IEventsBudgetItem & { id: string }> {
+    const item = await fetchJson<IEventsBudgetItem>(`${BASE}/budgets/${budgetId}/expenses`, {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    });
+    return mapItem(item);
   },
 
   // Stats

@@ -9,6 +9,7 @@ export interface ChatMessage {
   timestamp?: string;
   category?: string;
   suggestedActions?: string[];
+  citations?: string[];
   isDraftTemplate?: boolean;
 }
 
@@ -72,10 +73,52 @@ export interface ComplianceItem {
   affectedEmployeesCount?: number;
 }
 
+export interface DevelopmentRecommendationItem {
+  id: string;
+  _id?: string;
+  employeeId: string;
+  employeeName: string;
+  recommendationTitle: string;
+  recommendationType: 'Training' | 'Mentorship' | 'Course' | 'Certification' | 'Project';
+  description: string;
+  priority: 'High' | 'Medium' | 'Low';
+  estimatedDuration?: string;
+  provider?: string;
+  status: 'Pending' | 'In Progress' | 'Completed' | 'Dismissed';
+  targetSkill?: string;
+  progressPercentage?: number;
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token') || localStorage.getItem('auth_token') || sessionStorage.getItem('token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    try {
+      const u = JSON.parse(userStr);
+      if (u.id || u._id) headers['x-user-id'] = u.id || u._id;
+      if (u.name || u.empName) headers['x-user-name'] = u.name || u.empName;
+      if (u.role) headers['x-user-role'] = u.role;
+    } catch {
+      // Ignore
+    }
+  } else {
+    // Default logged-in role context for administrative AI dashboard access
+    headers['x-user-id'] = 'user-1';
+    headers['x-user-name'] = 'Sarah Joseph';
+    headers['x-user-role'] = 'Admin';
+  }
+  return headers;
+}
+
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const authHeaders = getAuthHeaders();
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
+    headers: { ...authHeaders, ...options?.headers },
   });
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}));
@@ -102,14 +145,27 @@ export const aiService = {
     return fetchJson<FlightRiskItem[]>(`${BASE_URL}/workforce/flight-risks${qs ? `?${qs}` : ''}`);
   },
 
+  async resolveFlightRisk(id: string, notes = 'Mitigation actions executed'): Promise<FlightRiskItem> {
+    return fetchJson<FlightRiskItem>(`${BASE_URL}/workforce/flight-risks/${id}/resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes }),
+    });
+  },
+
+  async deleteFlightRisk(id: string): Promise<any> {
+    return fetchJson<any>(`${BASE_URL}/workforce/flight-risks/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
   // 2. Performance & Skill Gaps
   async getSkillGaps(): Promise<SkillGapItem[]> {
     return fetchJson<SkillGapItem[]>(`${BASE_URL}/performance/skills`);
   },
 
-  async getDevelopmentRecommendations(employeeId?: string): Promise<any[]> {
+  async getDevelopmentRecommendations(employeeId?: string): Promise<DevelopmentRecommendationItem[]> {
     const qs = employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : '';
-    return fetchJson<any[]>(`${BASE_URL}/performance/recommendations${qs}`);
+    return fetchJson<DevelopmentRecommendationItem[]>(`${BASE_URL}/performance/recommendations${qs}`);
   },
 
   // 3. Conversational HR & EX
@@ -139,6 +195,19 @@ export const aiService = {
     return fetchJson<any>(`${BASE_URL}/knowledge-base/sync`, {
       method: 'POST',
     });
+  },
+
+  async getKnowledgeDocuments(): Promise<any[]> {
+    return fetchJson<any[]>(`${BASE_URL}/knowledge-base/documents`);
+  },
+
+  async getKnowledgeChunks(documentId?: string): Promise<any[]> {
+    const qs = documentId ? `?documentId=${encodeURIComponent(documentId)}` : '';
+    return fetchJson<any[]>(`${BASE_URL}/knowledge-base/chunks${qs}`);
+  },
+
+  async searchKnowledgeBase(q: string): Promise<any[]> {
+    return fetchJson<any[]>(`${BASE_URL}/knowledge-base/search?q=${encodeURIComponent(q)}`);
   },
 
   // 4. Automated Compliance

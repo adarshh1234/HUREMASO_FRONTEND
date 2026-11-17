@@ -1,12 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Search,
   Trash2,
   ChevronLeft,
   ChevronRight,
   HelpCircle,
-  Phone,
-  Mail,
   Plus,
   Eye,
   X,
@@ -15,74 +13,122 @@ import {
   XCircle,
   ChevronDown,
   Check,
-  RefreshCw,
   Building2,
   CalendarDays,
   TagIcon,
   Loader2,
+  FileText,
+  User,
+  ShieldCheck,
+  AlertCircle,
+  Send,
+  ArrowRight,
+  PackageCheck,
+  History,
+  Paperclip,
 } from 'lucide-react';
 import { useToast } from '../../hooks/useToast';
-import { miscellaneousRequestService } from '../../services/miscellaneousRequestService';
+import {
+  miscellaneousRequestService,
+  MiscRequestItem,
+  MiscRequestSummary,
+  MiscRequestAuditEntry,
+} from '../../services/miscellaneousRequestService';
 
-// ========================= TYPES =========================
+// ========================= CONSTANTS =========================
 
-interface MiscRequest {
-  id: string;
-  name: string;
-  dept: string;
-  type: string;
-  date: string;
-  status: 'Approved' | 'Pending' | 'Rejected';
-  priority: 'High' | 'Medium' | 'Low';
-  description?: string;
-  email?: string;
-}
-
-type StatusFilter = 'All' | 'Approved' | 'Pending' | 'Rejected';
-type PriorityFilter = 'All' | 'High' | 'Medium' | 'Low';
-
-// ========================= INITIAL DATA =========================
-
-const INITIAL_REQUESTS: MiscRequest[] = [
-  { id: 'REQ-001', name: 'Sarah Johnson',   dept: 'Marketing',     type: 'Office Equipment',     date: '2025-07-20', status: 'Approved', priority: 'High',   description: 'Request for a new ergonomic chair and dual monitor setup.', email: 'sarah.j@company.com' },
-  { id: 'REQ-002', name: 'Michael Torres',  dept: 'Engineering',   type: 'Software License',     date: '2025-07-22', status: 'Pending',  priority: 'Medium', description: 'Requesting JetBrains All-products pack annual license.', email: 'michael.t@company.com' },
-  { id: 'REQ-003', name: 'Priya Nair',      dept: 'Finance',       type: 'Travel Reimbursement', date: '2025-07-23', status: 'Rejected', priority: 'Low',    description: 'Expense claim for client site visit on July 18.', email: 'priya.n@company.com' },
-  { id: 'REQ-004', name: 'James Walker',    dept: 'HR',            type: 'Training Request',     date: '2025-07-24', status: 'Approved', priority: 'High',   description: 'External leadership training program enrollment.', email: 'james.w@company.com' },
-  { id: 'REQ-005', name: 'Aisha Patel',     dept: 'Operations',    type: 'Facility Repair',      date: '2025-07-25', status: 'Approved', priority: 'High',   description: 'Conference room projector replacement required urgently.', email: 'aisha.p@company.com' },
-  { id: 'REQ-006', name: 'Carlos Mendez',   dept: 'Sales',         type: 'Office Equipment',     date: '2025-07-26', status: 'Pending',  priority: 'High',   description: 'Laptop upgrade request for field sales activities.', email: 'carlos.m@company.com' },
-  { id: 'REQ-007', name: 'Nadia Kim',       dept: 'Design',        type: 'Software License',     date: '2025-07-27', status: 'Approved', priority: 'Medium', description: 'Adobe Creative Cloud subscription renewal.', email: 'nadia.k@company.com' },
-  { id: 'REQ-008', name: 'Ethan Brooks',    dept: 'Engineering',   type: 'Remote Work Setup',    date: '2025-07-28', status: 'Approved', priority: 'High',   description: 'Home office allowance for remote workstation.', email: 'ethan.b@company.com' },
-  { id: 'REQ-009', name: 'Fatima Al-Hassan', dept: 'Legal',        type: 'Document Services',    date: '2025-07-30', status: 'Pending',  priority: 'Low',    description: 'Notarization of employment verification letters.', email: 'fatima.a@company.com' },
-  { id: 'REQ-010', name: 'Lucas Rivera',    dept: 'Marketing',     type: 'Training Request',     date: '2025-08-01', status: 'Rejected', priority: 'Medium', description: 'LinkedIn Learning subscription request.', email: 'lucas.r@company.com' },
+const REQUEST_TYPES = [
+  'All Types',
+  'Office Equipment',
+  'Software License',
+  'Travel Reimbursement',
+  'Training Request',
+  'Facility Repair',
+  'Remote Work Setup',
+  'Document Services',
+  'Other',
 ];
 
-const REQUEST_TYPES = ['All Types', 'Office Equipment', 'Software License', 'Travel Reimbursement', 'Training Request', 'Facility Repair', 'Remote Work Setup', 'Document Services'];
-const DEPARTMENTS   = ['All Departments', 'Marketing', 'Engineering', 'Finance', 'HR', 'Operations', 'Sales', 'Design', 'Legal'];
+const DEPARTMENTS = [
+  'All Departments',
+  'Marketing',
+  'Engineering',
+  'Finance',
+  'HR',
+  'Operations',
+  'Sales',
+  'Design',
+  'Legal',
+];
+
+const STATUS_OPTIONS = [
+  'All',
+  'Pending',
+  'In Review',
+  'Approved',
+  'Rejected',
+  'Processed',
+];
+
+const PRIORITY_OPTIONS = ['All', 'High', 'Medium', 'Low'];
 
 // ========================= STATUS BADGE =========================
 
-const StatusBadge: React.FC<{ status: MiscRequest['status'] }> = ({ status }) => {
-  const cfg: Record<MiscRequest['status'], { cls: string; icon: React.ReactNode; label: string }> = {
-    Approved: { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="h-3 w-3" />, label: 'Approved' },
-    Pending:  { cls: 'bg-amber-50 text-amber-700 border-amber-200',       icon: <Clock className="h-3 w-3" />,         label: 'Pending' },
-    Rejected: { cls: 'bg-rose-50 text-rose-700 border-rose-200',          icon: <XCircle className="h-3 w-3" />,        label: 'Rejected' },
+export const StatusBadge: React.FC<{ status: MiscRequestItem['status'] }> = ({ status }) => {
+  const cfg: Record<
+    MiscRequestItem['status'],
+    { cls: string; icon: React.ReactNode; label: string }
+  > = {
+    Approved: {
+      cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      icon: <CheckCircle2 className="h-3 w-3" />,
+      label: 'Approved',
+    },
+    'In Review': {
+      cls: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      icon: <Clock className="h-3 w-3" />,
+      label: 'In Review',
+    },
+    Pending: {
+      cls: 'bg-amber-50 text-amber-700 border-amber-200',
+      icon: <Clock className="h-3 w-3" />,
+      label: 'Pending',
+    },
+    Rejected: {
+      cls: 'bg-rose-50 text-rose-700 border-rose-200',
+      icon: <XCircle className="h-3 w-3" />,
+      label: 'Rejected',
+    },
+    Processed: {
+      cls: 'bg-teal-50 text-teal-700 border-teal-200',
+      icon: <PackageCheck className="h-3 w-3" />,
+      label: 'Processed',
+    },
   };
-  const { cls, icon, label } = cfg[status];
+
+  const current = cfg[status] || cfg['Pending'];
   return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${cls}`}>
-      {icon}{label}
+    <span
+      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${current.cls}`}
+    >
+      {current.icon}
+      {current.label}
     </span>
   );
 };
 
-const PriorityBadge: React.FC<{ priority: MiscRequest['priority'] }> = ({ priority }) => {
-  const cfg: Record<MiscRequest['priority'], string> = {
-    High:   'bg-rose-50 text-rose-600 border-rose-200',
+export const PriorityBadge: React.FC<{ priority: MiscRequestItem['priority'] }> = ({ priority }) => {
+  const cfg: Record<MiscRequestItem['priority'], string> = {
+    High: 'bg-rose-50 text-rose-600 border-rose-200',
     Medium: 'bg-blue-50 text-blue-600 border-blue-200',
-    Low:    'bg-slate-100 text-slate-500 border-slate-200',
+    Low: 'bg-slate-100 text-slate-500 border-slate-200',
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${cfg[priority]}`}>
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+        cfg[priority] || cfg['Medium']
+      }`}
+    >
       {priority}
     </span>
   );
@@ -146,24 +192,28 @@ const FilterDropdown: React.FC<FilterDropdownProps> = ({ label, value, options, 
   );
 };
 
-// ========================= REQUEST MODAL =========================
+// ========================= CREATE / EDIT MODAL =========================
 
 interface RequestModalProps {
-  mode: 'create' | 'view' | 'edit';
-  request?: MiscRequest;
+  mode: 'create' | 'edit';
+  request?: MiscRequestItem;
   onClose: () => void;
-  onCreate?: (req: Omit<MiscRequest, 'id'>) => void;
-  onUpdate?: (req: MiscRequest) => void;
+  onSubmitSuccess: (item: MiscRequestItem) => void;
 }
 
-const RequestModal: React.FC<RequestModalProps> = ({ mode, request, onClose, onCreate, onUpdate }) => {
+const RequestFormModal: React.FC<RequestModalProps> = ({ mode, request, onClose, onSubmitSuccess }) => {
+  const toast = useToast();
+  const [submitting, setSubmitting] = useState(false);
   const [name, setName] = useState(request?.name || '');
   const [email, setEmail] = useState(request?.email || '');
   const [dept, setDept] = useState(request?.dept || 'Engineering');
   const [type, setType] = useState(request?.type || 'Office Equipment');
-  const [priority, setPriority] = useState<MiscRequest['priority']>(request?.priority || 'Medium');
-  const [status, setStatus] = useState<MiscRequest['status']>(request?.status || 'Pending');
+  const [title, setTitle] = useState(request?.title || '');
+  const [priority, setPriority] = useState<MiscRequestItem['priority']>(request?.priority || 'Medium');
+  const [requiredDate, setRequiredDate] = useState(request?.requiredDate || '');
   const [description, setDescription] = useState(request?.description || '');
+  const [attachmentInput, setAttachmentInput] = useState('');
+  const [attachments, setAttachments] = useState<string[]>(request?.attachments || []);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = () => {
@@ -175,37 +225,66 @@ const RequestModal: React.FC<RequestModalProps> = ({ mode, request, onClose, onC
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mode === 'view') { onClose(); return; }
-    if (!validate()) return;
-
-    if (mode === 'create' && onCreate) {
-      onCreate({
-        name,
-        email,
-        dept,
-        type,
-        priority,
-        status: 'Pending',
-        description,
-        date: new Date().toISOString().split('T')[0],
-      });
-    } else if (mode === 'edit' && onUpdate && request) {
-      onUpdate({
-        ...request,
-        name,
-        email,
-        dept,
-        type,
-        priority,
-        status,
-        description,
-      });
+  const handleAddAttachment = () => {
+    if (attachmentInput.trim()) {
+      setAttachments([...attachments, attachmentInput.trim()]);
+      setAttachmentInput('');
     }
   };
 
-  const title = mode === 'create' ? 'Create Miscellaneous Request' : mode === 'edit' ? 'Edit Request' : 'Request Details';
+  const handleRemoveAttachment = (idx: number) => {
+    setAttachments(attachments.filter((_, i) => i !== idx));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    try {
+      setSubmitting(true);
+      if (mode === 'create') {
+        const created = await miscellaneousRequestService.create({
+          name,
+          employee: name,
+          email,
+          dept,
+          department: dept,
+          type,
+          requestType: type,
+          title: title.trim() || undefined,
+          priority,
+          status: 'Pending',
+          requiredDate: requiredDate || undefined,
+          description,
+          attachments,
+          date: new Date().toISOString().split('T')[0],
+        });
+        toast.success(`Request ${created.requestId || created.id} submitted successfully!`);
+        onSubmitSuccess(created);
+      } else if (mode === 'edit' && request) {
+        const updated = await miscellaneousRequestService.update(request.id, {
+          name,
+          employee: name,
+          email,
+          dept,
+          department: dept,
+          type,
+          requestType: type,
+          title: title.trim() || undefined,
+          priority,
+          requiredDate: requiredDate || undefined,
+          description,
+          attachments,
+        });
+        toast.success(`Request ${request.requestId || request.id} updated successfully!`);
+        onSubmitSuccess(updated);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Operation failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
@@ -214,11 +293,15 @@ const RequestModal: React.FC<RequestModalProps> = ({ mode, request, onClose, onC
         <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[#003636] to-[#004848] text-white">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-              <Plus className="h-4 w-4" />
+              {mode === 'create' ? <Plus className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
             </div>
             <div>
-              <h2 className="text-base font-bold">{title}</h2>
-              {request?.id && <span className="text-[10px] text-white/70 font-mono">{request.id}</span>}
+              <h2 className="text-base font-bold">
+                {mode === 'create' ? 'Create Miscellaneous Request' : 'Edit Request'}
+              </h2>
+              {request?.requestId && (
+                <span className="text-[10px] text-white/70 font-mono">{request.requestId}</span>
+              )}
             </div>
           </div>
           <button
@@ -231,178 +314,175 @@ const RequestModal: React.FC<RequestModalProps> = ({ mode, request, onClose, onC
 
         {/* Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-          {mode === 'view' ? (
-            <div className="space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                <div>
-                  <span className="text-slate-400 font-medium">Employee</span>
-                  <p className="font-bold text-slate-800 mt-0.5">{request?.name}</p>
-                  <p className="text-[11px] text-slate-500">{request?.email}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-medium">Department</span>
-                  <p className="font-bold text-slate-800 mt-0.5">{request?.dept}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-medium">Request Type</span>
-                  <p className="font-bold text-slate-800 mt-0.5">{request?.type}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-medium">Date Submitted</span>
-                  <p className="font-bold text-slate-800 mt-0.5">{request?.date}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-medium">Priority</span>
-                  <div className="mt-1">
-                    {request && <PriorityBadge priority={request.priority} />}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-medium">Status</span>
-                  <div className="mt-1">
-                    {request && <StatusBadge status={request.status} />}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-slate-400 font-medium">Description / Details</span>
-                <p className="mt-1 p-3 bg-slate-50 rounded-xl border border-slate-100 text-slate-700 leading-relaxed">
-                  {request?.description || 'No detailed description provided.'}
-                </p>
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Employee Name <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Sarah Johnson"
+                className={`w-full px-3 py-2 text-xs rounded-xl border ${
+                  errors.name ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200'
+                } focus:outline-hidden focus:border-[#004848] transition-all`}
+              />
+              {errors.name && <p className="text-[10px] text-rose-500 mt-1">{errors.name}</p>}
             </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Employee Full Name <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Sarah Johnson"
-                  className={`w-full px-3 py-2 text-xs rounded-xl border ${
-                    errors.name ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200'
-                  } focus:outline-hidden focus:border-[#004848] transition-all`}
-                />
-                {errors.name && <p className="text-[10px] text-rose-500 mt-1">{errors.name}</p>}
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Email Address <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. sarah.j@company.com"
-                  className={`w-full px-3 py-2 text-xs rounded-xl border ${
-                    errors.email ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200'
-                  } focus:outline-hidden focus:border-[#004848] transition-all`}
-                />
-                {errors.email && <p className="text-[10px] text-rose-500 mt-1">{errors.email}</p>}
-              </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Email Address <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="e.g. sarah.j@company.com"
+                className={`w-full px-3 py-2 text-xs rounded-xl border ${
+                  errors.email ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200'
+                } focus:outline-hidden focus:border-[#004848] transition-all`}
+              />
+              {errors.email && <p className="text-[10px] text-rose-500 mt-1">{errors.email}</p>}
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Department</label>
-                  <select
-                    value={dept}
-                    onChange={(e) => setDept(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Department</label>
+              <select
+                value={dept}
+                onChange={(e) => setDept(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
+              >
+                {DEPARTMENTS.filter((d) => !d.startsWith('All')).map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Request Type</label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
+              >
+                {REQUEST_TYPES.filter((t) => !t.startsWith('All')).map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Priority</label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as MiscRequestItem['priority'])}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
+              >
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Required By Date</label>
+              <input
+                type="date"
+                value={requiredDate}
+                onChange={(e) => setRequiredDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Description / Business Justification <span className="text-rose-500">*</span>
+            </label>
+            <textarea
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Provide complete justification and details regarding this request..."
+              className={`w-full px-3 py-2 text-xs rounded-xl border ${
+                errors.description ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200'
+              } focus:outline-hidden focus:border-[#004848] transition-all`}
+            />
+            {errors.description && (
+              <p className="text-[10px] text-rose-500 mt-1">{errors.description}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Supporting Reference / URL
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={attachmentInput}
+                onChange={(e) => setAttachmentInput(e.target.value)}
+                placeholder="e.g. https://store.example.com/item or doc-ref-102"
+                className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-[#004848]"
+              />
+              <button
+                type="button"
+                onClick={handleAddAttachment}
+                className="px-3 py-2 text-xs font-bold text-[#004848] bg-[#004848]/10 hover:bg-[#004848]/20 rounded-xl transition-all"
+              >
+                Add
+              </button>
+            </div>
+            {attachments.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {attachments.map((att, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-[11px] text-slate-700 border border-slate-200"
                   >
-                    {DEPARTMENTS.filter((d) => !d.startsWith('All')).map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Request Type</label>
-                  <select
-                    value={type}
-                    onChange={(e) => setType(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
-                  >
-                    {REQUEST_TYPES.filter((t) => !t.startsWith('All')).map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Priority</label>
-                  <select
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value as MiscRequest['priority'])}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
-                </div>
-
-                {mode === 'edit' && (
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
-                    <select
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value as MiscRequest['status'])}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-[#004848]"
+                    <Paperclip className="h-3 w-3 text-slate-400" />
+                    <span className="max-w-[200px] truncate">{att}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(i)}
+                      className="text-slate-400 hover:text-rose-600"
                     >
-                      <option value="Approved">Approved</option>
-                      <option value="Pending">Pending</option>
-                      <option value="Rejected">Rejected</option>
-                    </select>
-                  </div>
-                )}
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Description / Justification <span className="text-rose-500">*</span>
-                </label>
-                <textarea
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Provide detailed information regarding your request..."
-                  className={`w-full px-3 py-2 text-xs rounded-xl border ${
-                    errors.description ? 'border-rose-400 bg-rose-50/30' : 'border-slate-200'
-                  } focus:outline-hidden focus:border-[#004848] transition-all`}
-                />
-                {errors.description && <p className="text-[10px] text-rose-500 mt-1">{errors.description}</p>}
-              </div>
-            </>
-          )}
+            )}
+          </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
+              disabled={submitting}
               className="px-4 py-2 text-xs font-semibold text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
             >
-              {mode === 'view' ? 'Close' : 'Cancel'}
+              Cancel
             </button>
-            {mode !== 'view' && (
-              <button
-                type="submit"
-                className="px-5 py-2 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-[#003636] to-[#004848] hover:opacity-95 shadow-sm transition-all cursor-pointer"
-              >
-                {mode === 'create' ? 'Create Request' : 'Save Changes'}
-              </button>
-            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-[#003636] to-[#004848] hover:opacity-95 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+            >
+              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              <span>{mode === 'create' ? 'Submit Request' : 'Save Changes'}</span>
+            </button>
           </div>
         </form>
       </div>
@@ -410,15 +490,452 @@ const RequestModal: React.FC<RequestModalProps> = ({ mode, request, onClose, onC
   );
 };
 
-// ========================= DELETE MODAL =========================
+// ========================= VIEW DETAILS & WORKFLOW MODAL =========================
 
-interface DeleteModalProps {
-  request: MiscRequest;
-  onConfirm: (id: string) => void;
-  onCancel: () => void;
+interface ViewDetailsModalProps {
+  request: MiscRequestItem;
+  onClose: () => void;
+  onStatusChange: (updated: MiscRequestItem) => void;
 }
 
-const DeleteModal: React.FC<DeleteModalProps> = ({ request, onConfirm, onCancel }) => (
+const ViewDetailsModal: React.FC<ViewDetailsModalProps> = ({ request, onClose, onStatusChange }) => {
+  const toast = useToast();
+  const [loadingAction, setLoadingAction] = useState(false);
+  const [activeActionModal, setActiveActionModal] = useState<'approve' | 'reject' | null>(null);
+  const [remarksInput, setRemarksInput] = useState('');
+  const [rejectReasonError, setRejectReasonError] = useState('');
+
+  const handleStartReview = async () => {
+    try {
+      setLoadingAction(true);
+      const updated = await miscellaneousRequestService.startReview(
+        request.id,
+        'HR Reviewer',
+        'Review started'
+      );
+      toast.success(`Request ${request.requestId} moved to In Review`);
+      onStatusChange(updated);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start review');
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleApproveConfirm = async () => {
+    try {
+      setLoadingAction(true);
+      const updated = await miscellaneousRequestService.approve(
+        request.id,
+        'HR Director',
+        remarksInput.trim() || undefined
+      );
+      toast.success(`Request ${request.requestId} approved!`);
+      setActiveActionModal(null);
+      setRemarksInput('');
+      onStatusChange(updated);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to approve request');
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleRejectConfirm = async () => {
+    if (!remarksInput.trim()) {
+      setRejectReasonError('Rejection reason is required');
+      return;
+    }
+    try {
+      setLoadingAction(true);
+      const updated = await miscellaneousRequestService.reject(
+        request.id,
+        remarksInput.trim(),
+        'HR Director'
+      );
+      toast.success(`Request ${request.requestId} rejected.`);
+      setActiveActionModal(null);
+      setRemarksInput('');
+      onStatusChange(updated);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reject request');
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleProcessConfirm = async () => {
+    try {
+      setLoadingAction(true);
+      const updated = await miscellaneousRequestService.process(
+        request.id,
+        'Fulfillment Desk',
+        'Order placed and fulfilled.'
+      );
+      toast.success(`Request ${request.requestId} fulfilled!`);
+      onStatusChange(updated);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to process request');
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[88vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[#003636] to-[#004848] text-white">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold">Request Details</h2>
+                <span className="text-xs font-mono bg-white/20 px-2 py-0.5 rounded-full">
+                  {request.requestId}
+                </span>
+              </div>
+              <p className="text-[11px] text-white/70">
+                Submitted on {request.date || 'N/A'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-6 space-y-4 overflow-y-auto text-xs">
+          {/* Key Metric Highlights Banner */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 font-medium">Status:</span>
+              <StatusBadge status={request.status} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 font-medium">Priority:</span>
+              <PriorityBadge priority={request.priority} />
+            </div>
+            {request.requiredDate && (
+              <div className="flex items-center gap-1.5 text-slate-600 font-semibold">
+                <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+                <span>Required By: {request.requiredDate}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Employee & Dept Info */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3.5 bg-white rounded-xl border border-slate-100">
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                Employee
+              </span>
+              <p className="font-bold text-slate-800 text-xs mt-0.5">{request.name}</p>
+              <p className="text-[11px] text-slate-500 truncate">{request.email || 'No email'}</p>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                Department
+              </span>
+              <p className="font-bold text-slate-800 text-xs mt-0.5">{request.dept}</p>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                Request Type
+              </span>
+              <p className="font-bold text-slate-800 text-xs mt-0.5">{request.type}</p>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                Created By
+              </span>
+              <p className="font-bold text-slate-800 text-xs mt-0.5">
+                {request.createdBy || request.name}
+              </p>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Description & Justification
+            </span>
+            <div className="mt-1 p-3.5 bg-slate-50/70 rounded-xl border border-slate-100 text-slate-700 leading-relaxed font-normal">
+              {request.description || 'No detailed description provided.'}
+            </div>
+          </div>
+
+          {/* Attachments */}
+          {request.attachments && request.attachments.length > 0 && (
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Attachments & References ({request.attachments.length})
+              </span>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {request.attachments.map((att, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 font-medium"
+                  >
+                    <Paperclip className="h-3 w-3 text-slate-400" />
+                    <span>{att}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Approval Remarks or Rejection Reason Banner */}
+          {request.status === 'Approved' && (request.approvalRemarks || request.reviewerName) && (
+            <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-emerald-900 space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Approval Remarks</span>
+                {request.reviewerName && (
+                  <span className="text-[10px] text-emerald-700 font-normal">
+                    — by {request.reviewerName}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-emerald-800">
+                {request.approvalRemarks || 'Approved for procurement.'}
+              </p>
+            </div>
+          )}
+
+          {request.status === 'Rejected' && (
+            <div className="p-3.5 rounded-xl bg-rose-50/70 border border-rose-200 text-rose-900 space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-xs">
+                <XCircle className="h-3.5 w-3.5 text-rose-600" />
+                <span>Rejection Reason</span>
+                {request.reviewerName && (
+                  <span className="text-[10px] text-rose-700 font-normal">
+                    — reviewed by {request.reviewerName}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-rose-800">
+                {request.rejectionReason || request.comments || 'Request declined by reviewer.'}
+              </p>
+            </div>
+          )}
+
+          {request.status === 'Processed' && (
+            <div className="p-3.5 rounded-xl bg-teal-50/70 border border-teal-200 text-teal-900 space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-xs">
+                <PackageCheck className="h-3.5 w-3.5 text-teal-600" />
+                <span>Fulfilled & Processed</span>
+                {request.processedBy && (
+                  <span className="text-[10px] text-teal-700 font-normal">
+                    — by {request.processedBy}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-teal-800">
+                {request.processedAt ? `Processed on ${request.processedAt}` : 'Request completed.'}
+              </p>
+            </div>
+          )}
+
+          {/* Audit History Timeline */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-2 font-bold text-slate-700 text-xs">
+              <History className="h-3.5 w-3.5 text-slate-500" />
+              <span>Audit History & Lifecycle</span>
+            </div>
+            {request.auditHistory && request.auditHistory.length > 0 ? (
+              <div className="relative pl-5 border-l-2 border-slate-100 space-y-3.5 my-2">
+                {request.auditHistory.map((entry, idx) => (
+                  <div key={idx} className="relative">
+                    <div className="absolute -left-[27px] top-0.5 w-3.5 h-3.5 rounded-full bg-white border-2 border-[#004848] flex items-center justify-center" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800">{entry.action}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">
+                          {entry.newStatus}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        by <strong className="text-slate-700">{entry.changedBy}</strong>
+                        {entry.remarks ? ` — ${entry.remarks}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-3 bg-slate-50 rounded-xl text-slate-400 text-center text-[11px]">
+                No explicit audit logs recorded yet.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {/* Action buttons depending on state */}
+            {request.status === 'Pending' && (
+              <button
+                type="button"
+                onClick={handleStartReview}
+                disabled={loadingAction}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 font-bold text-xs transition-all cursor-pointer"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                <span>Start Review</span>
+              </button>
+            )}
+
+            {(request.status === 'Pending' || request.status === 'In Review') && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemarksInput('');
+                    setRejectReasonError('');
+                    setActiveActionModal('approve');
+                  }}
+                  disabled={loadingAction}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 font-bold text-xs shadow-xs transition-all cursor-pointer"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Approve</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemarksInput('');
+                    setRejectReasonError('');
+                    setActiveActionModal('reject');
+                  }}
+                  disabled={loadingAction}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 text-white hover:bg-rose-700 font-bold text-xs shadow-xs transition-all cursor-pointer"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  <span>Reject</span>
+                </button>
+              </>
+            )}
+
+            {request.status === 'Approved' && (
+              <button
+                type="button"
+                onClick={handleProcessConfirm}
+                disabled={loadingAction}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-700 text-white hover:bg-teal-800 font-bold text-xs shadow-xs transition-all cursor-pointer"
+              >
+                <PackageCheck className="h-3.5 w-3.5" />
+                <span>Mark as Processed / Fulfilled</span>
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 rounded-xl hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+
+        {/* Sub-Modal: Approve with Remarks or Reject with Reason */}
+        {activeActionModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-slate-800">
+                  {activeActionModal === 'approve' ? 'Approve Request' : 'Reject Request'}
+                </h3>
+                <button
+                  onClick={() => setActiveActionModal(null)}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {activeActionModal === 'approve'
+                    ? 'Approval Remarks (Optional)'
+                    : 'Reason for Rejection *'}
+                </label>
+                <textarea
+                  rows={3}
+                  value={remarksInput}
+                  onChange={(e) => {
+                    setRemarksInput(e.target.value);
+                    if (rejectReasonError) setRejectReasonError('');
+                  }}
+                  placeholder={
+                    activeActionModal === 'approve'
+                      ? 'Add any comments or procurement notes...'
+                      : 'Please specify the exact reason for rejecting this request...'
+                  }
+                  className={`w-full p-2.5 text-xs rounded-xl border ${
+                    rejectReasonError ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                  } focus:outline-hidden focus:border-[#004848]`}
+                />
+                {rejectReasonError && (
+                  <p className="text-[10px] text-rose-500 mt-1">{rejectReasonError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveActionModal(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 rounded-xl hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={
+                    activeActionModal === 'approve'
+                      ? handleApproveConfirm
+                      : handleRejectConfirm
+                  }
+                  disabled={loadingAction}
+                  className={`px-4 py-1.5 text-xs font-bold text-white rounded-xl shadow-xs transition-all ${
+                    activeActionModal === 'approve'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  {loadingAction ? 'Processing...' : 'Confirm'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ========================= DELETE CONFIRMATION MODAL =========================
+
+interface DeleteModalProps {
+  request: MiscRequestItem;
+  onConfirm: (id: string) => void;
+  onCancel: () => void;
+  isDeleting: boolean;
+}
+
+const DeleteModal: React.FC<DeleteModalProps> = ({ request, onConfirm, onCancel, isDeleting }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
     <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 text-center space-y-4">
       <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center mx-auto text-rose-600">
@@ -427,22 +944,26 @@ const DeleteModal: React.FC<DeleteModalProps> = ({ request, onConfirm, onCancel 
       <div>
         <h3 className="text-sm font-bold text-slate-900">Delete Request?</h3>
         <p className="text-xs text-slate-500 mt-1">
-          Are you sure you want to delete <span className="font-bold text-slate-700">{request.id}</span> submitted by{' '}
-          <span className="font-bold text-slate-700">{request.name}</span>?
+          Are you sure you want to permanently delete{' '}
+          <span className="font-bold text-slate-700">{request.requestId || request.id}</span> submitted
+          by <span className="font-bold text-slate-700">{request.name}</span>?
         </p>
       </div>
       <div className="flex items-center justify-center gap-2 pt-2">
         <button
           onClick={onCancel}
+          disabled={isDeleting}
           className="px-4 py-2 text-xs font-semibold text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
         >
           Cancel
         </button>
         <button
           onClick={() => onConfirm(request.id)}
-          className="px-4 py-2 text-xs font-bold text-white rounded-xl bg-rose-600 hover:bg-rose-700 shadow-sm transition-all cursor-pointer"
+          disabled={isDeleting}
+          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white rounded-xl bg-rose-600 hover:bg-rose-700 shadow-sm transition-all cursor-pointer disabled:opacity-50"
         >
-          Delete
+          {isDeleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <span>Delete</span>
         </button>
       </div>
     </div>
@@ -454,49 +975,61 @@ const DeleteModal: React.FC<DeleteModalProps> = ({ request, onConfirm, onCancel 
 export const MiscellaneousRequestPage: React.FC = () => {
   const toast = useToast();
 
-  const [requests, setRequests] = useState<MiscRequest[]>(INITIAL_REQUESTS);
+  const [requests, setRequests] = useState<MiscRequestItem[]>([]);
+  const [summary, setSummary] = useState<MiscRequestSummary>({
+    total: 0,
+    pending: 0,
+    inReview: 0,
+    approved: 0,
+    rejected: 0,
+    processed: 0,
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
-  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('All');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [priorityFilter, setPriorityFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All Types');
   const [deptFilter, setDeptFilter] = useState('All Departments');
 
-  const [selectedRequest, setSelectedRequest] = useState<MiscRequest | undefined>(undefined);
+  const [selectedRequest, setSelectedRequest] = useState<MiscRequestItem | undefined>(undefined);
   const [modalMode, setModalMode] = useState<'create' | 'view' | 'edit' | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<MiscRequest | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MiscRequestItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 8;
 
-  const loadRequests = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await miscellaneousRequestService.getAll();
-      if (data && data.length > 0) {
-        setRequests(data as any);
-      }
-    } catch (err) {
+      const [allRequests, summaryData] = await Promise.all([
+        miscellaneousRequestService.getAll(),
+        miscellaneousRequestService.getSummary(),
+      ]);
+      setRequests(allRequests);
+      setSummary(summaryData);
+    } catch (err: any) {
       console.error('Failed to load miscellaneous requests:', err);
+      toast.error('Could not load requests from server');
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
-    loadRequests();
-  }, []);
-
-  // Counts
-  const totalCount = requests.length;
-  const pendingCount = requests.filter((r) => r.status === 'Pending').length;
-  const approvedCount = requests.filter((r) => r.status === 'Approved').length;
-  const rejectedCount = requests.filter((r) => r.status === 'Rejected').length;
+    loadData();
+  }, [loadData]);
 
   // Filtering
   const filtered = useMemo(() => {
     return requests.filter((r) => {
-      if (statusFilter !== 'All' && r.status !== statusFilter) return false;
+      if (statusFilter !== 'All') {
+        if (statusFilter === 'Pending' && r.status !== 'Pending') return false;
+        if (statusFilter === 'In Review' && r.status !== 'In Review') return false;
+        if (statusFilter === 'Approved' && r.status !== 'Approved') return false;
+        if (statusFilter === 'Rejected' && r.status !== 'Rejected') return false;
+        if (statusFilter === 'Processed' && r.status !== 'Processed') return false;
+      }
       if (priorityFilter !== 'All' && r.priority !== priorityFilter) return false;
       if (typeFilter !== 'All Types' && r.type !== typeFilter) return false;
       if (deptFilter !== 'All Departments' && r.dept !== deptFilter) return false;
@@ -505,6 +1038,7 @@ export const MiscellaneousRequestPage: React.FC = () => {
         const match =
           r.name.toLowerCase().includes(q) ||
           r.id.toLowerCase().includes(q) ||
+          r.requestId.toLowerCase().includes(q) ||
           r.dept.toLowerCase().includes(q) ||
           r.type.toLowerCase().includes(q) ||
           (r.description && r.description.toLowerCase().includes(q)) ||
@@ -525,37 +1059,37 @@ export const MiscellaneousRequestPage: React.FC = () => {
     if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
-  const handleCreate = async (newReq: Omit<MiscRequest, 'id'>) => {
-    try {
-      const created = await miscellaneousRequestService.create(newReq as any);
-      setRequests([created as any, ...requests]);
-      setModalMode(null);
-      toast.success(`Request ${created.requestId || created.id} submitted successfully!`);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to submit request');
-    }
+  const handleCreateSuccess = (newReq: MiscRequestItem) => {
+    setRequests((prev) => [newReq, ...prev]);
+    setSummary((prev) => ({
+      ...prev,
+      total: prev.total + 1,
+      pending: prev.pending + 1,
+    }));
+    setModalMode(null);
   };
 
-  const handleUpdate = async (updated: MiscRequest) => {
-    try {
-      const saved = await miscellaneousRequestService.update(updated.id, updated as any);
-      setRequests(requests.map((r) => (r.id === updated.id ? (saved as any) : r)));
-      setModalMode(null);
-      setSelectedRequest(undefined);
-      toast.success(`Request ${updated.id} updated successfully!`);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to update request');
+  const handleUpdateSuccess = (updated: MiscRequestItem) => {
+    setRequests((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    if (selectedRequest && selectedRequest.id === updated.id) {
+      setSelectedRequest(updated);
     }
+    setModalMode(null);
+    miscellaneousRequestService.getSummary().then(setSummary).catch(() => {});
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteConfirm = async (id: string) => {
     try {
+      setIsDeleting(true);
       await miscellaneousRequestService.delete(id);
-      setRequests(requests.filter((r) => r.id !== id));
+      setRequests((prev) => prev.filter((r) => r.id !== id));
       setDeleteTarget(null);
-      toast.success(`Request ${id} deleted.`);
+      toast.success('Request deleted.');
+      miscellaneousRequestService.getSummary().then(setSummary).catch(() => {});
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete request');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -585,11 +1119,14 @@ export const MiscellaneousRequestPage: React.FC = () => {
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-xs text-[11px] font-bold text-teal-100 uppercase tracking-wide">
               <HelpCircle className="h-3 w-3" />
-              Support Center
+              Support & Employee Requests
             </div>
-            <h1 className="text-xl md:text-2xl font-extrabold text-white m-0">Support & Miscellaneous Requests</h1>
+            <h1 className="text-xl md:text-2xl font-extrabold text-white m-0">
+              Miscellaneous Requests
+            </h1>
             <p className="text-xs text-white/80 max-w-xl">
-              Manage employee support requests, track statuses, and process approvals.
+              Track, review, approve, and fulfill employee hardware, software licenses, travel, and
+              administrative miscellaneous requests.
             </p>
           </div>
 
@@ -610,9 +1147,14 @@ export const MiscellaneousRequestPage: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
         {/* Total Requests */}
         <div
-          onClick={() => { setStatusFilter('All'); setCurrentPage(1); }}
+          onClick={() => {
+            setStatusFilter('All');
+            setCurrentPage(1);
+          }}
           className={`p-4 rounded-2xl border transition-all cursor-pointer bg-white ${
-            statusFilter === 'All' ? 'border-[#004848] shadow-md ring-2 ring-[#004848]/10' : 'border-slate-100 hover:border-slate-200'
+            statusFilter === 'All'
+              ? 'border-[#004848] shadow-md ring-2 ring-[#004848]/10'
+              : 'border-slate-100 hover:border-slate-200'
           }`}
         >
           <div className="flex items-center justify-between">
@@ -624,17 +1166,22 @@ export const MiscellaneousRequestPage: React.FC = () => {
             </span>
           </div>
           <div className="mt-2.5">
-            <h3 className="text-2xl font-extrabold text-slate-800">{totalCount}</h3>
+            <h3 className="text-2xl font-extrabold text-slate-800">{summary.total}</h3>
             <p className="text-[11px] font-bold text-slate-600 mt-0.5">Total Requests</p>
-            <span className="text-[10px] text-slate-400">All time submissions</span>
+            <span className="text-[10px] text-slate-400">All submissions</span>
           </div>
         </div>
 
-        {/* Pending */}
+        {/* Pending & In Review */}
         <div
-          onClick={() => { setStatusFilter('Pending'); setCurrentPage(1); }}
+          onClick={() => {
+            setStatusFilter(statusFilter === 'Pending' ? 'In Review' : 'Pending');
+            setCurrentPage(1);
+          }}
           className={`p-4 rounded-2xl border transition-all cursor-pointer bg-white ${
-            statusFilter === 'Pending' ? 'border-amber-500 shadow-md ring-2 ring-amber-500/10' : 'border-slate-100 hover:border-slate-200'
+            statusFilter === 'Pending' || statusFilter === 'In Review'
+              ? 'border-amber-500 shadow-md ring-2 ring-amber-500/10'
+              : 'border-slate-100 hover:border-slate-200'
           }`}
         >
           <div className="flex items-center justify-between">
@@ -642,21 +1189,30 @@ export const MiscellaneousRequestPage: React.FC = () => {
               <Clock className="h-4 w-4" />
             </div>
             <span className="text-[10px] font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
-              In Review
+              {summary.inReview > 0 ? `${summary.inReview} Reviewing` : 'Awaiting Action'}
             </span>
           </div>
           <div className="mt-2.5">
-            <h3 className="text-2xl font-extrabold text-slate-800">{pendingCount}</h3>
-            <p className="text-[11px] font-bold text-slate-600 mt-0.5">Pending Review</p>
-            <span className="text-[10px] text-slate-400">Awaiting action</span>
+            <h3 className="text-2xl font-extrabold text-slate-800">
+              {summary.pending + (summary.inReview || 0)}
+            </h3>
+            <p className="text-[11px] font-bold text-slate-600 mt-0.5">Pending & In Review</p>
+            <span className="text-[10px] text-slate-400">
+              {summary.pending} pending, {summary.inReview || 0} in review
+            </span>
           </div>
         </div>
 
-        {/* Approved */}
+        {/* Approved & Processed */}
         <div
-          onClick={() => { setStatusFilter('Approved'); setCurrentPage(1); }}
+          onClick={() => {
+            setStatusFilter('Approved');
+            setCurrentPage(1);
+          }}
           className={`p-4 rounded-2xl border transition-all cursor-pointer bg-white ${
-            statusFilter === 'Approved' ? 'border-emerald-500 shadow-md ring-2 ring-emerald-500/10' : 'border-slate-100 hover:border-slate-200'
+            statusFilter === 'Approved' || statusFilter === 'Processed'
+              ? 'border-emerald-500 shadow-md ring-2 ring-emerald-500/10'
+              : 'border-slate-100 hover:border-slate-200'
           }`}
         >
           <div className="flex items-center justify-between">
@@ -664,21 +1220,30 @@ export const MiscellaneousRequestPage: React.FC = () => {
               <CheckCircle2 className="h-4 w-4" />
             </div>
             <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-              Processed
+              Approved
             </span>
           </div>
           <div className="mt-2.5">
-            <h3 className="text-2xl font-extrabold text-slate-800">{approvedCount}</h3>
-            <p className="text-[11px] font-bold text-slate-600 mt-0.5">Approved</p>
-            <span className="text-[10px] text-slate-400">Successfully processed</span>
+            <h3 className="text-2xl font-extrabold text-slate-800">
+              {summary.approved + (summary.processed || 0)}
+            </h3>
+            <p className="text-[11px] font-bold text-slate-600 mt-0.5">Approved & Processed</p>
+            <span className="text-[10px] text-slate-400">
+              {summary.approved} approved, {summary.processed || 0} fulfilled
+            </span>
           </div>
         </div>
 
         {/* Rejected */}
         <div
-          onClick={() => { setStatusFilter('Rejected'); setCurrentPage(1); }}
+          onClick={() => {
+            setStatusFilter('Rejected');
+            setCurrentPage(1);
+          }}
           className={`p-4 rounded-2xl border transition-all cursor-pointer bg-white ${
-            statusFilter === 'Rejected' ? 'border-rose-500 shadow-md ring-2 ring-rose-500/10' : 'border-slate-100 hover:border-slate-200'
+            statusFilter === 'Rejected'
+              ? 'border-rose-500 shadow-md ring-2 ring-rose-500/10'
+              : 'border-slate-100 hover:border-slate-200'
           }`}
         >
           <div className="flex items-center justify-between">
@@ -690,9 +1255,9 @@ export const MiscellaneousRequestPage: React.FC = () => {
             </span>
           </div>
           <div className="mt-2.5">
-            <h3 className="text-2xl font-extrabold text-slate-800">{rejectedCount}</h3>
+            <h3 className="text-2xl font-extrabold text-slate-800">{summary.rejected}</h3>
             <p className="text-[11px] font-bold text-slate-600 mt-0.5">Rejected</p>
-            <span className="text-[10px] text-slate-400">Declined requests</span>
+            <span className="text-[10px] text-slate-400">Declined submissions</span>
           </div>
         </div>
       </div>
@@ -706,8 +1271,11 @@ export const MiscellaneousRequestPage: React.FC = () => {
             <input
               type="text"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-              placeholder="Search by name, type, department, or ID..."
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Search by employee, request ID, department, or keyword..."
               className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-hidden focus:border-[#004848] transition-all"
             />
             {search && (
@@ -725,15 +1293,21 @@ export const MiscellaneousRequestPage: React.FC = () => {
             <FilterDropdown
               label="Status"
               value={statusFilter}
-              options={['All', 'Approved', 'Pending', 'Rejected']}
-              onChange={(val) => { setStatusFilter(val as StatusFilter); setCurrentPage(1); }}
+              options={STATUS_OPTIONS}
+              onChange={(val) => {
+                setStatusFilter(val);
+                setCurrentPage(1);
+              }}
             />
 
             <FilterDropdown
               label="Request Type"
               value={typeFilter}
               options={REQUEST_TYPES}
-              onChange={(val) => { setTypeFilter(val); setCurrentPage(1); }}
+              onChange={(val) => {
+                setTypeFilter(val);
+                setCurrentPage(1);
+              }}
               icon={<TagIcon className="h-3 w-3 opacity-60" />}
             />
 
@@ -741,8 +1315,21 @@ export const MiscellaneousRequestPage: React.FC = () => {
               label="Department"
               value={deptFilter}
               options={DEPARTMENTS}
-              onChange={(val) => { setDeptFilter(val); setCurrentPage(1); }}
+              onChange={(val) => {
+                setDeptFilter(val);
+                setCurrentPage(1);
+              }}
               icon={<Building2 className="h-3 w-3 opacity-60" />}
+            />
+
+            <FilterDropdown
+              label="Priority"
+              value={priorityFilter}
+              options={PRIORITY_OPTIONS}
+              onChange={(val) => {
+                setPriorityFilter(val);
+                setCurrentPage(1);
+              }}
             />
 
             {hasActiveFilters && (
@@ -758,13 +1345,15 @@ export const MiscellaneousRequestPage: React.FC = () => {
 
         <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium px-1">
           <span>
-            Showing <strong className="text-slate-800">{filtered.length}</strong> results
+            Showing <strong className="text-slate-800">{filtered.length}</strong> matching requests
           </span>
-          <span className="text-[10px] text-slate-400">Click any row to view full details</span>
+          <span className="text-[10px] text-slate-400">
+            Click any row to view full details and history
+          </span>
         </div>
       </div>
 
-      {/* ================= TABLE ================= */}
+      {/* ================= DATA TABLE ================= */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
@@ -786,7 +1375,9 @@ export const MiscellaneousRequestPage: React.FC = () => {
                   <td colSpan={8} className="py-12 text-center text-slate-400">
                     <div className="flex items-center justify-center gap-2">
                       <Loader2 className="h-5 w-5 animate-spin text-[#004848]" />
-                      <span className="text-xs font-semibold text-slate-600">Loading requests...</span>
+                      <span className="text-xs font-semibold text-slate-600">
+                        Loading requests from server...
+                      </span>
                     </div>
                   </td>
                 </tr>
@@ -797,7 +1388,7 @@ export const MiscellaneousRequestPage: React.FC = () => {
                       <HelpCircle className="h-8 w-8 mx-auto text-slate-300" />
                       <p className="font-bold text-slate-700">No requests found</p>
                       <p className="text-[11px] text-slate-400">
-                        Try adjusting your search query or active filter settings.
+                        Try adjusting your search query or reset filter settings.
                       </p>
                     </div>
                   </td>
@@ -812,7 +1403,9 @@ export const MiscellaneousRequestPage: React.FC = () => {
                     }}
                     className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
                   >
-                    <td className="py-3 px-4 font-mono font-bold text-[#004848]">{req.id}</td>
+                    <td className="py-3 px-4 font-mono font-bold text-[#004848]">
+                      {req.requestId || req.id}
+                    </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2.5">
                         <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#003636] to-teal-500 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
@@ -831,7 +1424,7 @@ export const MiscellaneousRequestPage: React.FC = () => {
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-1 text-slate-500 font-semibold">
                         <CalendarDays className="h-3 w-3 shrink-0" />
-                        <span>{new Date(req.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                        <span>{req.date}</span>
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -843,18 +1436,24 @@ export const MiscellaneousRequestPage: React.FC = () => {
                     <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1.5">
                         <button
-                          onClick={() => { setSelectedRequest(req); setModalMode('view'); }}
-                          title="View Details"
+                          onClick={() => {
+                            setSelectedRequest(req);
+                            setModalMode('view');
+                          }}
+                          title="View Details & Workflow"
                           className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:bg-teal-50 hover:text-[#004848] hover:border-teal-200 transition-all cursor-pointer"
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          onClick={() => { setSelectedRequest(req); setModalMode('edit'); }}
+                          onClick={() => {
+                            setSelectedRequest(req);
+                            setModalMode('edit');
+                          }}
                           title="Edit Request"
                           className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all cursor-pointer"
                         >
-                          <RefreshCw className="h-3.5 w-3.5" />
+                          <FileText className="h-3.5 w-3.5" />
                         </button>
                         <button
                           onClick={() => setDeleteTarget(req)}
@@ -876,7 +1475,8 @@ export const MiscellaneousRequestPage: React.FC = () => {
         {filtered.length > ITEMS_PER_PAGE && (
           <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50">
             <span className="text-[11px] text-slate-500 font-semibold">
-              Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)} of {filtered.length} requests
+              Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–
+              {Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)} of {filtered.length} requests
             </span>
             <div className="flex items-center gap-1.5">
               <button
@@ -891,7 +1491,9 @@ export const MiscellaneousRequestPage: React.FC = () => {
                   key={`page-${p}`}
                   onClick={() => handlePageChange(p)}
                   className={`w-7 h-7 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                    p === currentPage ? 'bg-[#004848] text-white shadow-sm' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                    p === currentPage
+                      ? 'bg-[#004848] text-white shadow-sm'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
                   }`}
                 >
                   {p}
@@ -910,21 +1512,38 @@ export const MiscellaneousRequestPage: React.FC = () => {
       </div>
 
       {/* Modals */}
-      {(modalMode === 'create' || modalMode === 'view' || modalMode === 'edit') && (
-        <RequestModal
+      {(modalMode === 'create' || modalMode === 'edit') && (
+        <RequestFormModal
           mode={modalMode}
           request={selectedRequest}
-          onClose={() => { setModalMode(null); setSelectedRequest(undefined); }}
-          onCreate={handleCreate}
-          onUpdate={handleUpdate}
+          onClose={() => {
+            setModalMode(null);
+            setSelectedRequest(undefined);
+          }}
+          onSubmitSuccess={(item) => {
+            if (modalMode === 'create') handleCreateSuccess(item);
+            else handleUpdateSuccess(item);
+          }}
+        />
+      )}
+
+      {modalMode === 'view' && selectedRequest && (
+        <ViewDetailsModal
+          request={selectedRequest}
+          onClose={() => {
+            setModalMode(null);
+            setSelectedRequest(undefined);
+          }}
+          onStatusChange={handleUpdateSuccess}
         />
       )}
 
       {deleteTarget && (
         <DeleteModal
           request={deleteTarget}
-          onConfirm={handleDelete}
+          onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteTarget(null)}
+          isDeleting={isDeleting}
         />
       )}
     </div>

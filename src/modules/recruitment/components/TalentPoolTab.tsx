@@ -28,6 +28,8 @@ export const TalentPoolTab: React.FC = () => {
 
   // Candidates & Pools State
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [pools, setPools] = useState<TalentPoolDef[]>(DEFAULT_POOLS);
+  const [vacancies, setVacancies] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Filter State
@@ -39,11 +41,21 @@ export const TalentPoolTab: React.FC = () => {
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
+  const [isAssociateModalOpen, setIsAssociateModalOpen] = useState(false);
+  const [candidateToAssociate, setCandidateToAssociate] = useState<Candidate | null>(null);
+  const [selectedVacancyId, setSelectedVacancyId] = useState('');
   const [selectedPool, setSelectedPool] = useState<TalentPoolDef | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [isCandidateDetailOpen, setIsCandidateDetailOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Add Category Form
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryDept, setNewCategoryDept] = useState('Engineering');
+  const [newCategorySkills, setNewCategorySkills] = useState('');
+  const [newCategoryDesc, setNewCategoryDesc] = useState('');
 
   // Add Candidate Form
   const initialFormState = {
@@ -69,9 +81,7 @@ export const TalentPoolTab: React.FC = () => {
     setIsLoading(true);
     try {
       const data = await recruitmentService.getCandidates();
-      if (data && data.length > 0) {
-        setCandidates(data);
-      }
+      setCandidates(data);
     } catch {
       // fallback
     } finally {
@@ -79,8 +89,29 @@ export const TalentPoolTab: React.FC = () => {
     }
   };
 
+  // Fetch Talent Pools from MongoDB
+  const fetchPools = async () => {
+    try {
+      const data = await recruitmentService.getTalentPools();
+      if (data && data.length > 0) {
+        setPools(
+          data.map((p: any) => ({
+            id: p.id || p._id,
+            title: p.name || p.title,
+            skills: p.tags && p.tags.length > 0 ? p.tags : ['Core Competencies'],
+            baseProgress: p.candidateCount ? Math.min(100, p.candidateCount * 20) : 35,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Failed to load talent pools:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCandidates();
+    fetchPools();
+    recruitmentService.getVacancies().then(setVacancies).catch(() => {});
   }, []);
 
   // Filter candidates based on top filter bar
@@ -116,8 +147,8 @@ export const TalentPoolTab: React.FC = () => {
       const category = (c.poolCategory || c.talentPool || '').toLowerCase();
       if (category === poolTitle.toLowerCase()) return true;
 
-      // Fallback matching by pool skills
-      const poolDef = DEFAULT_POOLS.find((p) => p.title.toLowerCase() === poolTitle.toLowerCase());
+      // Matching by pool skills
+      const poolDef = pools.find((p) => p.title.toLowerCase() === poolTitle.toLowerCase());
       if (poolDef && c.skills) {
         const matchesSkill = c.skills.some((s) =>
           poolDef.skills.some((ps) => ps.toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes(ps.toLowerCase()))
@@ -126,6 +157,58 @@ export const TalentPoolTab: React.FC = () => {
       }
       return false;
     });
+  };
+
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) {
+      toast.error('Category name is required');
+      return;
+    }
+    try {
+      const tags = newCategorySkills.split(',').map((s) => s.trim()).filter(Boolean);
+      await recruitmentService.createTalentPool({
+        name: newCategoryName.trim(),
+        department: newCategoryDept.trim(),
+        tags: tags.length > 0 ? tags : ['Skills'],
+        description: newCategoryDesc.trim() || undefined,
+      });
+      toast.success(`Talent pool category "${newCategoryName}" created successfully!`);
+      setIsAddCategoryOpen(false);
+      setNewCategoryName('');
+      setNewCategorySkills('');
+      setNewCategoryDesc('');
+      fetchPools();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create category');
+    }
+  };
+
+  const handleShortlistCandidate = async (cand: Candidate) => {
+    try {
+      await recruitmentService.updateCandidateStatus(cand.id, 'Shortlisted');
+      setCandidates((prev) => prev.map((c) => (c.id === cand.id ? { ...c, status: 'Shortlisted' } : c)));
+      toast.success(`Candidate ${cand.name} marked as Shortlisted!`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to shortlist candidate');
+    }
+  };
+
+  const handleAssociateCandidateWithVacancy = async () => {
+    if (!candidateToAssociate || !selectedVacancyId) {
+      toast.error('Please select an active vacancy');
+      return;
+    }
+    try {
+      const poolId = selectedPool?.id || 'default';
+      await recruitmentService.associateCandidateWithJob(poolId, candidateToAssociate.id, selectedVacancyId);
+      toast.success(`Candidate ${candidateToAssociate.name} associated with vacancy successfully!`);
+      setIsAssociateModalOpen(false);
+      setCandidateToAssociate(null);
+      fetchCandidates();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to associate candidate with vacancy');
+    }
   };
 
   // Reset Filters
@@ -228,10 +311,10 @@ export const TalentPoolTab: React.FC = () => {
             {filteredCandidates.length} Total Candidates
           </span>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2.5">
           <button
             onClick={() => setShowFilterBar(!showFilterBar)}
-            className={`flex items-center gap-1.5 px-4 py-2 border rounded-lg transition-colors cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg transition-colors cursor-pointer text-xs font-bold ${
               showFilterBar || filterSkill || filterExperience || filterCategory || filterStatus
                 ? 'bg-blue-50 border-[#0473b8] text-[#0473b8]'
                 : 'border-slate-200 hover:bg-slate-50 bg-white text-slate-700'
@@ -244,11 +327,18 @@ export const TalentPoolTab: React.FC = () => {
             )}
           </button>
           <button
-            onClick={() => openAddCandidateModal()}
-            className="px-4 py-2 bg-[#0473b8] hover:bg-[#03629e] text-white rounded-lg shadow-sm cursor-pointer transition-all flex items-center gap-1.5"
+            onClick={() => setIsAddCategoryOpen(true)}
+            className="px-3 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg shadow-2xs cursor-pointer transition-all flex items-center gap-1.5 text-xs font-bold"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>+ Add New Candidate</span>
+            <span>+ Add Category</span>
+          </button>
+          <button
+            onClick={() => openAddCandidateModal()}
+            className="px-3.5 py-2 bg-[#0473b8] hover:bg-[#03629e] text-white rounded-lg shadow-sm cursor-pointer transition-all flex items-center gap-1.5 text-xs font-bold"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Add Candidate</span>
           </button>
         </div>
       </div>
@@ -350,10 +440,12 @@ export const TalentPoolTab: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {DEFAULT_POOLS.map((card) => {
+          {pools.map((card) => {
             const poolCandidates = getCandidatesForPool(card.title);
             const countDisplay = `${poolCandidates.length} candidate${poolCandidates.length === 1 ? '' : 's'}`;
-            const progressVal = Math.min(100, Math.max(15, poolCandidates.length * 20 || (card.baseProgress || 35)));
+            const progressVal = candidates.length > 0
+              ? Math.min(100, Math.max(8, Math.round((poolCandidates.length / candidates.length) * 100)))
+              : 0;
 
             return (
               <div
@@ -369,7 +461,7 @@ export const TalentPoolTab: React.FC = () => {
                   </div>
 
                   <ul className="text-[10px] font-bold text-slate-450 space-y-1 pl-4 list-disc pt-1">
-                    {card.skills.map((s, idx) => (
+                    {card.skills.slice(0, 4).map((s, idx) => (
                       <li key={`${s}-${idx}`}>{s}</li>
                     ))}
                   </ul>
@@ -491,9 +583,9 @@ export const TalentPoolTab: React.FC = () => {
                     <div className="grid grid-cols-12 px-4 py-2.5 bg-slate-50 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider border-b border-slate-200">
                       <span className="col-span-4">Candidate</span>
                       <span className="col-span-2">Experience</span>
-                      <span className="col-span-3">Skills</span>
+                      <span className="col-span-2">Skills</span>
                       <span className="col-span-2">Status</span>
-                      <span className="col-span-1 text-right">Action</span>
+                      <span className="col-span-2 text-right">Actions</span>
                     </div>
 
                     <div className="divide-y divide-slate-100">
@@ -527,12 +619,12 @@ export const TalentPoolTab: React.FC = () => {
                           </div>
 
                           {/* Skills */}
-                          <div className="col-span-3 flex flex-wrap gap-1 pr-2">
+                          <div className="col-span-2 flex flex-wrap gap-1 pr-2">
                             {cand.skills && cand.skills.length > 0 ? (
-                              cand.skills.slice(0, 3).map((s, idx) => (
+                              cand.skills.slice(0, 2).map((s, idx) => (
                                 <span
                                   key={idx}
-                                  className="text-[9px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200"
+                                  className="text-[9px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-[80px]"
                                 >
                                   {s}
                                 </span>
@@ -540,9 +632,9 @@ export const TalentPoolTab: React.FC = () => {
                             ) : (
                               <span className="text-[10px] text-slate-400 italic">No skills listed</span>
                             )}
-                            {cand.skills && cand.skills.length > 3 && (
+                            {cand.skills && cand.skills.length > 2 && (
                               <span className="text-[9px] font-bold text-slate-400">
-                                +{cand.skills.length - 3}
+                                +{cand.skills.length - 2}
                               </span>
                             )}
                           </div>
@@ -563,18 +655,38 @@ export const TalentPoolTab: React.FC = () => {
                             </Badge>
                           </div>
 
-                          {/* Action */}
-                          <div className="col-span-1 text-right">
+                          {/* Actions */}
+                          <div className="col-span-2 flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => {
                                 setSelectedCandidate(cand);
                                 setIsCandidateDetailOpen(true);
                               }}
-                              className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors cursor-pointer"
-                              title="View Details"
+                              className="p-1 text-slate-400 hover:text-slate-800 rounded transition-colors cursor-pointer"
+                              title="View Profile"
                             >
                               <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleShortlistCandidate(cand)}
+                              className="p-1 text-slate-400 hover:text-emerald-600 rounded transition-colors cursor-pointer"
+                              title="Shortlist Candidate"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCandidateToAssociate(cand);
+                                setSelectedVacancyId(vacancies[0]?.id || '');
+                                setIsAssociateModalOpen(true);
+                              }}
+                              className="p-1 text-slate-400 hover:text-[#0473b8] rounded transition-colors cursor-pointer"
+                              title="Associate to Vacancy"
+                            >
+                              <Briefcase className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
@@ -943,6 +1055,160 @@ export const TalentPoolTab: React.FC = () => {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== ASSOCIATE CANDIDATE WITH VACANCY MODAL ===================== */}
+      {isAssociateModalOpen && candidateToAssociate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#0473b8] flex items-center justify-center border border-blue-100">
+                  <Briefcase className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 leading-tight">Add to Vacancy</h3>
+                  <p className="text-[11px] text-slate-500">{candidateToAssociate.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAssociateModalOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700 transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs font-bold text-slate-700">
+              <div>
+                <label className="block mb-1.5">Select Vacancy *</label>
+                <select
+                  value={selectedVacancyId}
+                  onChange={(e) => setSelectedVacancyId(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-semibold outline-none focus:border-[#0473b8]"
+                >
+                  <option value="">Select an active vacancy</option>
+                  {vacancies.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.jobTitle || v.title} ({v.department})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 bg-slate-50 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setIsAssociateModalOpen(false)}
+                className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAssociateCandidateWithVacancy}
+                className="px-5 py-2 bg-[#0473b8] hover:bg-[#03629e] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+              >
+                Associate Candidate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== ADD TALENT POOL CATEGORY MODAL ===================== */}
+      {isAddCategoryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#0473b8] flex items-center justify-center border border-blue-100">
+                  <Award className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 leading-tight">Add Skill Category</h3>
+                  <p className="text-[11px] text-slate-500">Create a new talent pool category</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddCategoryOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700 transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCategory} className="p-6 space-y-4 text-xs font-bold text-slate-700">
+              <div>
+                <label className="block mb-1.5">Category Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Cloud & DevOps Engineers"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-semibold outline-none focus:border-[#0473b8]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5">Department</label>
+                <select
+                  value={newCategoryDept}
+                  onChange={(e) => setNewCategoryDept(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-semibold outline-none focus:border-[#0473b8]"
+                >
+                  <option value="Engineering">Engineering</option>
+                  <option value="Design">Design</option>
+                  <option value="Product">Product</option>
+                  <option value="Data">Data</option>
+                  <option value="Human Resources">Human Resources</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1.5">Skills / Tags (comma separated)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. AWS, Kubernetes, Docker, Terraform"
+                  value={newCategorySkills}
+                  onChange={(e) => setNewCategorySkills(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-semibold outline-none focus:border-[#0473b8]"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5">Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="Brief summary of skills or requirements..."
+                  value={newCategoryDesc}
+                  onChange={(e) => setNewCategoryDesc(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-semibold outline-none focus:border-[#0473b8] resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddCategoryOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#0473b8] hover:bg-[#03629e] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  Create Category
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

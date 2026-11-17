@@ -11,19 +11,20 @@ export const AddEventPage: React.FC = () => {
 
   // Toggle states
   const [locationType, setLocationType] = useState<'in-person' | 'online'>('in-person');
-  
+
   // Quick settings toggles
   const [sendReminder, setSendReminder] = useState(true);
   const [syncCalendar, setSyncCalendar] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
 
   // Form states
+  const todayStr = new Date().toISOString().slice(0, 10);
   const [title, setTitle] = useState('');
   const [eventType, setEventType] = useState('Training Session');
   const [desc, setDesc] = useState('');
-  const [startDate, setStartDate] = useState('2026-08-15');
+  const [startDate, setStartDate] = useState(todayStr);
   const [startTime, setStartTime] = useState('09:00 AM');
-  const [endDate, setEndDate] = useState('2026-08-15');
+  const [endDate, setEndDate] = useState(todayStr);
   const [endTime, setEndTime] = useState('05:00 PM');
   const [timezone, setTimezone] = useState('UTC+4 (Dubai)');
   const [venue, setVenue] = useState('Main Conference Hall');
@@ -56,6 +57,18 @@ export const AddEventPage: React.FC = () => {
       toast.error('Event title and start date are required');
       return;
     }
+
+    if (endDate && endDate < startDate) {
+      toast.error('End date cannot precede the start date');
+      return;
+    }
+
+    const budgetAmount = parseFloat(allocatedBudget) || 0;
+    if (budgetAmount < 0) {
+      toast.error('Budget cannot be negative');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const taskObjects: IEventTask[] = checklistItems.map((item, idx) => ({
@@ -67,22 +80,20 @@ export const AddEventPage: React.FC = () => {
         progress: 0,
       }));
 
-      const budgetAmount = parseFloat(allocatedBudget) || 0;
-
-      await eventService.createEvent({
+      const createdEvent = await eventService.createEvent({
         title: title.trim(),
         eventType,
         description: desc.trim(),
         startDate,
         startTime,
-        endDate,
+        endDate: endDate || startDate,
         endTime,
         timezone,
-        venue: locationType === 'in-person' ? venue : 'Online / Virtual Platform',
+        venue: locationType === 'in-person' ? (venue.trim() || 'Main Conference Hall') : (venue.trim() || 'Online / Virtual Platform'),
         locationType,
         department: dept,
         organizer,
-        attendeeCount: 20,
+        attendeeCount: 15,
         status: 'Up coming',
         progress: `0/${taskObjects.length} Task`,
         tasks: taskObjects,
@@ -95,6 +106,25 @@ export const AddEventPage: React.FC = () => {
         syncCalendar,
         emailNotifications,
       });
+
+      // Synchronize budget in the budget management module if budget allocated
+      if (budgetAmount > 0) {
+        try {
+          await eventService.createBudget({
+            eventName: title.trim(),
+            eventTitle: title.trim(),
+            department: dept,
+            allocated: budgetAmount,
+            spent: 0,
+            status: 'Approved',
+            category: eventType === 'Training Session' ? 'Training Sessions' : eventType === 'Team Meeting' ? 'Team Meetings' : 'General',
+            eventId: createdEvent.id,
+            expenses: [],
+          });
+        } catch {
+          // Non-blocking: event was created successfully
+        }
+      }
 
       toast.success(`Event "${title}" scheduled and saved to MongoDB!`);
       navigate('/events/all');
@@ -122,12 +152,12 @@ export const AddEventPage: React.FC = () => {
             <span className="block text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">
               Events Details
             </span>
-            
+
             <div className="space-y-3.5 text-xs font-bold text-slate-700">
               <div>
-                <label className="block mb-1.5">Events Title *</label>
-                <input 
-                  type="text" 
+                <label className="block mb-1.5 font-bold text-slate-800">Events Title *</label>
+                <input
+                  type="text"
                   required
                   placeholder="e.g. Q4 Executive Strategy Session"
                   value={title}
@@ -138,7 +168,7 @@ export const AddEventPage: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block mb-1.5">Events Type</label>
+                  <label className="block mb-1.5 font-bold text-slate-800">Events Type</label>
                   <select
                     value={eventType}
                     onChange={(e) => setEventType(e.target.value)}
@@ -153,7 +183,7 @@ export const AddEventPage: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block mb-1.5">Target Department</label>
+                  <label className="block mb-1.5 font-bold text-slate-800">Target Department</label>
                   <select
                     value={dept}
                     onChange={(e) => setDept(e.target.value)}
@@ -170,8 +200,8 @@ export const AddEventPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block mb-1.5">Description</label>
-                <textarea 
+                <label className="block mb-1.5 font-bold text-slate-800">Description</label>
+                <textarea
                   rows={3}
                   placeholder="Provide background context, objectives, and meeting links..."
                   value={desc}
@@ -190,7 +220,7 @@ export const AddEventPage: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-bold text-slate-700">
               <div>
-                <label className="block mb-1.5">Start Date *</label>
+                <label className="block mb-1.5 font-bold text-slate-800">Start Date *</label>
                 <input
                   type="date"
                   required
@@ -200,7 +230,7 @@ export const AddEventPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block mb-1.5">Start Time *</label>
+                <label className="block mb-1.5 font-bold text-slate-800">Start Time *</label>
                 <input
                   type="text"
                   placeholder="e.g. 09:00 AM"
@@ -210,16 +240,17 @@ export const AddEventPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block mb-1.5">End Date</label>
+                <label className="block mb-1.5 font-bold text-slate-800">End Date</label>
                 <input
                   type="date"
                   value={endDate}
+                  min={startDate}
                   onChange={(e) => setEndDate(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#0473b8]"
                 />
               </div>
               <div>
-                <label className="block mb-1.5">End Time</label>
+                <label className="block mb-1.5 font-bold text-slate-800">End Time</label>
                 <input
                   type="text"
                   placeholder="e.g. 05:00 PM"
@@ -232,7 +263,7 @@ export const AddEventPage: React.FC = () => {
 
             <div className="space-y-3 pt-2 text-xs font-bold text-slate-700">
               <div>
-                <label className="block mb-1.5">Location Type</label>
+                <label className="block mb-1.5 font-bold text-slate-800">Location Type</label>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -259,7 +290,7 @@ export const AddEventPage: React.FC = () => {
 
               {locationType === 'in-person' ? (
                 <div>
-                  <label className="block mb-1.5">Venue / Conference Room</label>
+                  <label className="block mb-1.5 font-bold text-slate-800">Venue / Conference Room</label>
                   <input
                     type="text"
                     placeholder="e.g. Boardroom A (5th Floor)"
@@ -270,7 +301,7 @@ export const AddEventPage: React.FC = () => {
                 </div>
               ) : (
                 <div>
-                  <label className="block mb-1.5">Video Call Link</label>
+                  <label className="block mb-1.5 font-bold text-slate-800">Video Call Link</label>
                   <input
                     type="text"
                     placeholder="e.g. https://meet.google.com/abc-xyz-123"
@@ -349,6 +380,7 @@ export const AddEventPage: React.FC = () => {
                 <label className="block mb-1.5 font-bold text-slate-800">Allocated Budget ($)</label>
                 <input
                   type="number"
+                  min="0"
                   value={allocatedBudget}
                   onChange={(e) => setAllocatedBudget(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-[#0473b8] font-mono"
