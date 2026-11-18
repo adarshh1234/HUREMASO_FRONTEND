@@ -84,6 +84,7 @@ export interface OrganizationData {
   zipCode?: string;
   country?: string;
   notes?: string;
+  employeeCount?: number;
   locations: Array<{ id?: string; _id?: string; name: string; city: string; country: string; phone?: string; employees?: number }>;
   structureTree?: any;
 }
@@ -108,6 +109,7 @@ export interface ConfigurationData {
   emailConfig: Record<string, any>;
   emailSubscriptions: Record<string, any>;
   localization: Record<string, any>;
+  languagePackages?: string[];
   modules: Record<string, any>;
   socialAuth: Record<string, any>;
   oauthClients: Record<string, any>;
@@ -679,6 +681,28 @@ export const adminService = {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to update configuration`);
     const json = await res.json();
     return json.data;
+  },
+
+  async testEmail(payload: { sendAsEmail: string; mailSentEngine?: string; smtpHost?: string }): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${ADMIN_API_BASE}/configuration/test-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.message || json.error?.message || `HTTP ${res.status}: Failed to send test email`);
+    return json.data || json;
+  },
+
+  async testLdap(payload: { serverUrl: string; port?: string | number; bindDn?: string; password?: string; baseDn?: string }): Promise<{ success: boolean; message: string; connected?: boolean }> {
+    const res = await fetch(`${ADMIN_API_BASE}/configuration/test-ldap`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.message || json.error?.message || `HTTP ${res.status}: Failed to test LDAP connection`);
+    return json.data || json;
   },
 
   // 8. ASSOCIATION REQUESTS

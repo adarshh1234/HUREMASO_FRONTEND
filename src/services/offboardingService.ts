@@ -3,14 +3,22 @@ import {
   CreateOffboardingRecordDTO,
   OffboardingReportsSummary,
   OffboardingQueryParams,
+  IOffboardingPerformance,
+  IOffboardingCustomField,
 } from '../types/offboarding';
 
 const VITE_API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
 const BASE = `${VITE_API_URL}/offboarding`;
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { ...headers, ...options?.headers },
     ...options,
   });
   if (!res.ok) {
@@ -28,7 +36,35 @@ function mapItem<T extends { _id?: string; id?: string }>(item: T): T & { id: st
   };
 }
 
+export interface SimpleEmployeePickerItem {
+  id: string;
+  employeeId: string;
+  name: string;
+  role: string;
+  department: string;
+  email?: string;
+}
+
 export const offboardingService = {
+  async getEmployees(): Promise<SimpleEmployeePickerItem[]> {
+    try {
+      const res = await fetch(`${VITE_API_URL}/employees`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      const list = json.data?.data || json.data || json || [];
+      return (Array.isArray(list) ? list : []).map((emp: any) => ({
+        id: (emp.id || emp._id || '') as string,
+        employeeId: (emp.employeeId || emp.empId || emp.id || '') as string,
+        name: (emp.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Employee') as string,
+        role: (emp.jobTitle || emp.role || emp.designation || 'Staff Member') as string,
+        department: (emp.department || 'Engineering') as string,
+        email: emp.email,
+      }));
+    } catch {
+      return [];
+    }
+  },
+
   async getRecords(params?: OffboardingQueryParams): Promise<{ items: (IOffboardingRecord & { id: string })[]; total: number }> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set('page', String(params.page));
@@ -75,8 +111,14 @@ export const offboardingService = {
       status?: string;
       noticeDuration?: string;
       reason?: string;
+      resignationDate?: string;
+      lastWorkingDate?: string;
+      effectiveDate?: string;
       terminationType?: string;
+      terminationReason?: string;
       severanceDetails?: string;
+      letterContent?: string;
+      docUrl?: string;
     }
   ): Promise<IOffboardingRecord & { id: string }> {
     const item = await fetchJson<IOffboardingRecord>(`${BASE}/records/${id}/document`, {
@@ -86,9 +128,20 @@ export const offboardingService = {
     return mapItem(item);
   },
 
+  async updatePerformance(
+    id: string,
+    payload: Partial<IOffboardingPerformance>
+  ): Promise<IOffboardingRecord & { id: string }> {
+    const item = await fetchJson<IOffboardingRecord>(`${BASE}/records/${id}/performance`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    return mapItem(item);
+  },
+
   async updateSettlement(
     id: string,
-    payload: Partial<IOffboardingRecord['settlement']>
+    payload: Partial<IOffboardingRecord['settlement']> & { auditAction?: string }
   ): Promise<IOffboardingRecord & { id: string }> {
     const item = await fetchJson<IOffboardingRecord>(`${BASE}/records/${id}/settlement`, {
       method: 'PATCH',
@@ -113,6 +166,7 @@ export const offboardingService = {
     payload: {
       items?: IOffboardingRecord['assets']['items'];
       dependencies?: IOffboardingRecord['assets']['dependencies'];
+      missingItems?: IOffboardingRecord['assets']['missingItems'];
       inspectionPassed?: boolean;
       totalDeductions?: number;
       clearedBy?: string;
@@ -133,6 +187,17 @@ export const offboardingService = {
     const item = await fetchJson<IOffboardingRecord>(`${BASE}/records/${id}/travel`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    });
+    return mapItem(item);
+  },
+
+  async updateCustomFields(
+    id: string,
+    customFields: IOffboardingCustomField[]
+  ): Promise<IOffboardingRecord & { id: string }> {
+    const item = await fetchJson<IOffboardingRecord>(`${BASE}/records/${id}/custom-fields`, {
+      method: 'PATCH',
+      body: JSON.stringify({ customFields }),
     });
     return mapItem(item);
   },

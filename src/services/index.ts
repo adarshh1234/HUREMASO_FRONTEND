@@ -26,4 +26,5 @@ export * from './aiService';
 export * from './miscellaneousRequestService';
 export * from './notificationBellService';
 export * from './supportService';
+export * from './dashboardService';
 

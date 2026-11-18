@@ -5,6 +5,7 @@ import Badge from '../../components/common/Badge';
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
 import adminService, { UserRecord } from '../../services/adminService';
+import { employeeService } from '../../services/employeeService';
 
 export const UserManagementPage: React.FC = () => {
   const toast = useToast();
@@ -16,6 +17,7 @@ export const UserManagementPage: React.FC = () => {
   const [records, setRecords] = useState<UserRecord[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [employeeOptions, setEmployeeOptions] = useState<string[]>([]);
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -48,6 +50,12 @@ export const UserManagementPage: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
+    employeeService.getAll()
+      .then(emps => {
+        const names = emps.map(e => e.name || `${e.firstName || ''} ${e.lastName || ''}`.trim()).filter(Boolean);
+        setEmployeeOptions(Array.from(new Set(names)));
+      })
+      .catch(() => {});
   }, []);
 
   const handleSearch = () => {
@@ -302,13 +310,21 @@ export const UserManagementPage: React.FC = () => {
               </div>
               <div>
                 <label className="block mb-1 font-bold text-slate-700">Employee Name *</label>
-                <input
-                  type="text"
-                  value={formData.empName}
-                  onChange={e => setFormData({ ...formData, empName: e.target.value })}
-                  placeholder="e.g. John Doe"
-                  className="w-full rounded-lg border border-slate-200 p-2.5 outline-none font-semibold text-slate-800 focus:border-[#0473b8]"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    list="user-employee-options"
+                    value={formData.empName}
+                    onChange={e => setFormData({ ...formData, empName: e.target.value })}
+                    placeholder="Select or enter employee..."
+                    className="w-full rounded-lg border border-slate-200 p-2.5 outline-none font-semibold text-slate-800 focus:border-[#0473b8]"
+                  />
+                  <datalist id="user-employee-options">
+                    {employeeOptions.map((name, idx) => (
+                      <option key={idx} value={name} />
+                    ))}
+                  </datalist>
+                </div>
               </div>
               <div>
                 <label className="block mb-1 font-bold text-slate-700">User Role</label>

@@ -153,6 +153,17 @@ export const onboardingService = {
     await fetchJson(`${BASE}/candidates/${id}`, { method: 'DELETE' });
   },
 
+  async convertToEmployee(id: string): Promise<{ employee: unknown; candidate: OnboardingCandidate }> {
+    const res = await fetchJson<{ employee: unknown; candidate: OnboardingCandidate }>(
+      `${BASE}/candidates/${id}/convert-to-employee`,
+      { method: 'POST' }
+    );
+    return {
+      employee: res.employee,
+      candidate: mapItem(res.candidate),
+    };
+  },
+
   async getReportsSummary(): Promise<OnboardingReportSummary> {
     return fetchJson<OnboardingReportSummary>(`${BASE}/reports`);
   },

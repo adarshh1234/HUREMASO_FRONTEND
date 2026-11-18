@@ -252,8 +252,21 @@ export const EmployeeOnboardingPage: React.FC = () => {
       const updated = await onboardingService.updateCandidate(currentCandidate.id, { status });
       setCandidates((prev) => prev.map((c) => (c.id === currentCandidate.id ? updated : c)));
       toast.success(`Candidate status updated to '${status}'!`);
-    } catch {
-      toast.error('Failed to update candidate status.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update candidate status.';
+      toast.error(msg);
+    }
+  };
+
+  const handleConvertToEmployee = async () => {
+    if (!currentCandidate) return;
+    try {
+      const res = await onboardingService.convertToEmployee(currentCandidate.id);
+      setCandidates((prev) => prev.map((c) => (c.id === currentCandidate.id ? res.candidate : c)));
+      toast.success(`Candidate ${currentCandidate.name} successfully converted to Employee!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to convert candidate to employee';
+      toast.error(msg);
     }
   };
 
@@ -295,12 +308,22 @@ export const EmployeeOnboardingPage: React.FC = () => {
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200">
             {currentCandidate.status}
           </span>
-          <button
-            onClick={() => handleUpdateCandidateStatus('Ready to Join')}
-            className="px-3 py-1 bg-[#004848] hover:bg-[#003333] text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
-          >
-            Mark Ready to Join
-          </button>
+          {currentCandidate.status !== 'Ready to Join' && currentCandidate.status !== 'Completed' && (
+            <button
+              onClick={() => handleUpdateCandidateStatus('Ready to Join')}
+              className="px-3 py-1 bg-[#004848] hover:bg-[#003333] text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
+            >
+              Mark Ready to Join
+            </button>
+          )}
+          {currentCandidate.status === 'Ready to Join' && (
+            <button
+              onClick={handleConvertToEmployee}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
+            >
+              Convert to Employee
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -433,10 +456,14 @@ export const EmployeeOnboardingPage: React.FC = () => {
                     <select
                       value={c.status}
                       onChange={(e) => {
+                        const newStatus = e.target.value as OnboardingCandidate['status'];
                         setSelectedCandidateId(c.id);
-                        onboardingService.updateCandidate(c.id, { status: e.target.value as any }).then((updated) => {
+                        onboardingService.updateCandidate(c.id, { status: newStatus }).then((updated) => {
                           setCandidates(prev => prev.map(item => item.id === c.id ? updated : item));
-                          toast.success(`Status updated to '${e.target.value}'`);
+                          toast.success(`Status updated to '${newStatus}'`);
+                        }).catch((err: unknown) => {
+                          const msg = err instanceof Error ? err.message : 'Failed to update status';
+                          toast.error(msg);
                         });
                       }}
                       className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white outline-none cursor-pointer"
@@ -479,7 +506,7 @@ export const EmployeeOnboardingPage: React.FC = () => {
             ].map((t) => (
               <button
                 key={t.id}
-                onClick={() => setBgTab(t.id as any)}
+                onClick={() => setBgTab(t.id as typeof bgTab)}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                   bgTab === t.id ? 'bg-[#004848] text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                 }`}
@@ -579,7 +606,7 @@ export const EmployeeOnboardingPage: React.FC = () => {
               ].map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => setAssessmentTab(t.id as any)}
+                  onClick={() => setAssessmentTab(t.id as typeof assessmentTab)}
                   className={`px-4 py-2 rounded-full text-xs font-bold transition-all border cursor-pointer ${
                     assessmentTab === t.id
                       ? 'bg-[#004848] text-white font-extrabold border-transparent shadow-sm'
@@ -600,7 +627,7 @@ export const EmployeeOnboardingPage: React.FC = () => {
                 ].map((sub) => (
                   <button
                     key={sub.id}
-                    onClick={() => setPsychometricSubTab(sub.id as any)}
+                    onClick={() => setPsychometricSubTab(sub.id as typeof psychometricSubTab)}
                     className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
                       psychometricSubTab === sub.id
                         ? 'bg-slate-900 text-white border-transparent shadow-xs'
@@ -846,7 +873,7 @@ export const EmployeeOnboardingPage: React.FC = () => {
             ].map((t) => (
               <button
                 key={t.id}
-                onClick={() => setDocTab(t.id as any)}
+                onClick={() => setDocTab(t.id as typeof docTab)}
                 className={`px-4 py-2 rounded-full text-xs font-bold transition-all cursor-pointer ${
                   docTab === t.id ? 'bg-[#004848] text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                 }`}
@@ -954,7 +981,7 @@ export const EmployeeOnboardingPage: React.FC = () => {
                     </div>
 
                     <button
-                      onClick={() => handleToggleProvision(prov.key as any)}
+                      onClick={() => handleToggleProvision(prov.key as keyof OnboardingCandidate['provisions'])}
                       className={`w-full py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer border ${
                         prov.active 
                           ? 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700' 

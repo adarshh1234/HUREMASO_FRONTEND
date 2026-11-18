@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Check, X, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
-import { financeRequestService } from '../../services/payrollService';
-import { PayrollFinanceRequest } from '../../types/payroll';
+import { Plus, Search, Check, X, ChevronLeft, ChevronRight, RefreshCw, Eye, FileText, User } from 'lucide-react';
+import { financeRequestService, getEmployees } from '../../services/payrollService';
+import { PayrollFinanceRequest, EmployeeReference } from '../../types/payroll';
 import Loader from '../../components/common/Loader';
 import EmptyState from '../../components/common/EmptyState';
 import Badge from '../../components/common/Badge';
 import Modal from '../../components/common/Modal';
 import { useToast } from '../../hooks/useToast';
+import PayrollAIFloat from './PayrollAIFloat';
 
 const REQUEST_TYPES = [
   'Salary Advance',
@@ -54,7 +55,24 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
   const [form, setForm] = useState<NewRequestForm>(initialForm);
   const [formErrors, setFormErrors] = useState<Partial<NewRequestForm>>({});
 
+  // Employee list
+  const [employees, setEmployees] = useState<EmployeeReference[]>([]);
+  const [selectedEmpId, setSelectedEmpId] = useState('');
+
+  // Review modal (Approve / Reject)
+  const [reviewRequest, setReviewRequest] = useState<PayrollFinanceRequest | null>(null);
+  const [reviewAction, setReviewAction] = useState<'Approved' | 'Rejected'>('Approved');
+  const [reviewRemarks, setReviewRemarks] = useState('');
+  const [isReviewing, setIsReviewing] = useState(false);
+
+  // Detail view modal
+  const [viewRequest, setViewRequest] = useState<PayrollFinanceRequest | null>(null);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    getEmployees().then(setEmployees).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -80,6 +98,19 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
     load();
   }, [load]);
 
+  const handleEmployeeSelect = (empId: string) => {
+    setSelectedEmpId(empId);
+    const emp = employees.find((e) => e.id === empId);
+    if (emp) {
+      setForm((f) => ({
+        ...f,
+        employeeName: emp.name,
+        employeeId: emp.id,
+        department: emp.department || f.department,
+      }));
+    }
+  };
+
   const validate = (): boolean => {
     const errors: Partial<NewRequestForm> = {};
     if (!form.employeeName.trim()) errors.employeeName = 'Required';
@@ -103,6 +134,7 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
       toast.success('Finance request submitted successfully!');
       setShowModal(false);
       setForm(initialForm);
+      setSelectedEmpId('');
       setPage(1);
       await load();
     } catch {
@@ -112,23 +144,24 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
     }
   };
 
-  const handleApprove = async (id: string) => {
-    try {
-      await financeRequestService.updateStatus(id, 'Approved');
-      toast.success('Finance request approved!');
-      await load();
-    } catch {
-      toast.error('Failed to approve request.');
-    }
+  const openReviewModal = (req: PayrollFinanceRequest, action: 'Approved' | 'Rejected') => {
+    setReviewRequest(req);
+    setReviewAction(action);
+    setReviewRemarks('');
   };
 
-  const handleReject = async (id: string) => {
+  const handleReviewSubmit = async () => {
+    if (!reviewRequest) return;
+    setIsReviewing(true);
     try {
-      await financeRequestService.updateStatus(id, 'Rejected');
-      toast.error('Finance request rejected.');
+      await financeRequestService.updateStatus(reviewRequest.id, reviewAction, reviewRemarks || undefined);
+      toast.success(`Finance request marked as ${reviewAction}!`);
+      setReviewRequest(null);
       await load();
     } catch {
-      toast.error('Failed to reject request.');
+      toast.error(`Failed to update request to ${reviewAction}.`);
+    } finally {
+      setIsReviewing(false);
     }
   };
 
@@ -146,7 +179,12 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
           <p className="text-xs text-slate-500 mt-1">Review, approve or reject employee finance and salary advance requests.</p>
         </div>
         <button
-          onClick={() => { setForm(initialForm); setFormErrors({}); setShowModal(true); }}
+          onClick={() => {
+            setForm(initialForm);
+            setSelectedEmpId('');
+            setFormErrors({});
+            setShowModal(true);
+          }}
           className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#002222] via-[#004848] to-[#006666] text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-opacity cursor-pointer shrink-0"
         >
           <Plus className="h-4 w-4" />
@@ -222,26 +260,35 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
                       <Badge variant={statusBadgeVariant(req.status) as any} size="sm">{req.status}</Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      {req.status === 'Pending' ? (
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => handleApprove(req.id)}
-                            className="p-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-100 cursor-pointer"
-                            title="Approve"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleReject(req.id)}
-                            className="p-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-md hover:bg-rose-100 cursor-pointer"
-                            title="Reject"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400 text-xs font-medium">Logged</span>
-                      )}
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setViewRequest(req)}
+                          className="p-1.5 text-slate-500 hover:text-slate-800 border border-slate-200 rounded-md hover:bg-slate-50 cursor-pointer"
+                          title="View Details"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                        {req.status === 'Pending' ? (
+                          <>
+                            <button
+                              onClick={() => openReviewModal(req, 'Approved')}
+                              className="p-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-100 cursor-pointer"
+                              title="Approve"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => openReviewModal(req, 'Rejected')}
+                              className="p-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-md hover:bg-rose-100 cursor-pointer"
+                              title="Reject"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-slate-400 text-xs font-medium">Logged</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -286,6 +333,25 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
       {/* Create Request Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="New Finance Request">
         <div className="space-y-4">
+          {/* Quick employee picker */}
+          {employees.length > 0 && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Select Employee (or fill manually)</label>
+              <select
+                value={selectedEmpId}
+                onChange={(e) => handleEmployeeSelect(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg p-2.5 text-xs outline-none focus:border-[#004848] bg-white cursor-pointer"
+              >
+                <option value="">-- Choose Existing Employee --</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} ({emp.department || 'N/A'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">Employee Name *</label>
@@ -344,7 +410,7 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
             {formErrors.amount && <p className="text-[10px] text-red-500 mt-1">{formErrors.amount}</p>}
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Description</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Description / Purpose</label>
             <textarea
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
@@ -370,6 +436,142 @@ export const EmployeeFinanceRequestsPage: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Review Modal (Approve / Reject) */}
+      <Modal
+        isOpen={!!reviewRequest}
+        onClose={() => setReviewRequest(null)}
+        title={`${reviewAction === 'Approved' ? 'Approve' : 'Reject'} Finance Request`}
+      >
+        {reviewRequest && (
+          <div className="space-y-4">
+            <div className={`p-3 rounded-lg border text-xs ${reviewAction === 'Approved' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-rose-50 border-rose-100 text-rose-800'}`}>
+              <p className="font-bold">
+                {reviewAction === 'Approved' ? 'Confirm Approval' : 'Confirm Rejection'} for {reviewRequest.employeeName}
+              </p>
+              <p className="mt-1">
+                Amount: <span className="font-bold">${reviewRequest.amount.toLocaleString()}</span> | Type: {reviewRequest.requestType}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Remarks / Reason {reviewAction === 'Rejected' ? '(Recommended)' : '(Optional)'}
+              </label>
+              <textarea
+                value={reviewRemarks}
+                onChange={(e) => setReviewRemarks(e.target.value)}
+                rows={3}
+                placeholder="Enter review remarks or justification..."
+                className="w-full border border-slate-200 rounded-lg p-2.5 text-xs outline-none focus:border-[#004848] resize-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setReviewRequest(null)}
+                className="px-5 py-2 border border-slate-300 text-slate-700 font-bold rounded-lg hover:bg-slate-50 text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReviewSubmit}
+                disabled={isReviewing}
+                className={`px-6 py-2 text-white font-bold rounded-lg text-xs cursor-pointer disabled:opacity-60 ${reviewAction === 'Approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}
+              >
+                {isReviewing ? 'Processing...' : `Confirm ${reviewAction}`}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* View Details Modal */}
+      <Modal
+        isOpen={!!viewRequest}
+        onClose={() => setViewRequest(null)}
+        title="Finance Request Details"
+      >
+        {viewRequest && (
+          <div className="space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="h-9 w-9 rounded-full bg-teal-50 flex items-center justify-center text-[#004848]">
+                  <User className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900 text-sm">{viewRequest.employeeName}</h4>
+                  <p className="text-[10px] text-slate-400">{viewRequest.requestId || viewRequest.id}</p>
+                </div>
+              </div>
+              <Badge variant={statusBadgeVariant(viewRequest.status) as any} size="sm">{viewRequest.status}</Badge>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              <div>
+                <span className="text-slate-400 font-medium">Request Type</span>
+                <p className="font-semibold text-slate-800">{viewRequest.requestType}</p>
+              </div>
+              <div>
+                <span className="text-slate-400 font-medium">Department</span>
+                <p className="font-semibold text-slate-800">{viewRequest.department}</p>
+              </div>
+              <div>
+                <span className="text-slate-400 font-medium">Requested Date</span>
+                <p className="font-semibold text-slate-800">{viewRequest.dateRequested}</p>
+              </div>
+              <div>
+                <span className="text-slate-400 font-medium">Requested Amount</span>
+                <p className="font-extrabold text-slate-900 text-sm">${viewRequest.amount.toLocaleString()}</p>
+              </div>
+            </div>
+
+            {viewRequest.description && (
+              <div>
+                <span className="text-slate-500 font-bold block mb-1">Description</span>
+                <p className="p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-700">
+                  {viewRequest.description}
+                </p>
+              </div>
+            )}
+
+            {viewRequest.remarks && (
+              <div>
+                <span className="text-slate-500 font-bold block mb-1">Review Remarks</span>
+                <p className="p-2.5 bg-teal-50/60 border border-teal-100 rounded-lg text-teal-900 font-medium">
+                  {viewRequest.remarks}
+                </p>
+              </div>
+            )}
+
+            {viewRequest.history && viewRequest.history.length > 0 && (
+              <div className="space-y-1.5 pt-2">
+                <span className="text-slate-500 font-bold block">Audit History</span>
+                <div className="space-y-1">
+                  {viewRequest.history.map((h, i) => (
+                    <div key={i} className="text-[10px] text-slate-500 flex justify-between bg-slate-50 px-2 py-1 rounded">
+                      <span><strong>{h.action}</strong> by {h.performedBy || 'System'}</span>
+                      <span>{new Date(h.timestamp).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setViewRequest(null)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Floating AI Assistant */}
+      <PayrollAIFloat />
     </div>
   );
 };

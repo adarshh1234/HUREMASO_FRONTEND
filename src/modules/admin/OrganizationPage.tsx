@@ -3,7 +3,7 @@ import { Plus, Trash2, Network } from 'lucide-react';
 import { useToast } from '../../hooks/useToast';
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
-import adminService, { OrganizationData } from '../../services/adminService';
+import adminService, { OrganizationData, DepartmentRecord } from '../../services/adminService';
 
 export const OrganizationPage: React.FC = () => {
   const toast = useToast();
@@ -36,11 +36,20 @@ export const OrganizationPage: React.FC = () => {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newLoc, setNewLoc] = useState({ name: '', city: '', country: 'Canada', phone: '', employees: 1 });
+  const [departments, setDepartments] = useState<DepartmentRecord[]>([]);
+  const [showAddUnitModal, setShowAddUnitModal] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [newUnitCode, setNewUnitCode] = useState('');
+  const [newUnitHead, setNewUnitHead] = useState('');
 
   const loadOrg = async () => {
     try {
-      const data = await adminService.getOrganization();
+      const [data, depts] = await Promise.all([
+        adminService.getOrganization(),
+        adminService.getDepartments().catch(() => []),
+      ]);
       if (data) setOrgData(data);
+      if (depts) setDepartments(depts);
     } catch (err) {
       toast.error('Failed to load organization data.');
     }
@@ -105,6 +114,40 @@ export const OrganizationPage: React.FC = () => {
       toast.success('Location added successfully.');
     } catch (err: any) {
       toast.error('Failed to add location.');
+    }
+  };
+
+  const handleAddUnit = async () => {
+    if (!newUnitName.trim()) {
+      toast.error('Unit name is required.');
+      return;
+    }
+    try {
+      const created = await adminService.createDepartment({
+        name: newUnitName.trim(),
+        code: newUnitCode.trim() || 'ORG-UNIT',
+        head: newUnitHead.trim() || 'Unassigned',
+      });
+      setDepartments([...departments, created]);
+      setShowAddUnitModal(false);
+      setNewUnitName('');
+      setNewUnitCode('');
+      setNewUnitHead('');
+      toast.success(`Organizational unit "${created.name}" created successfully.`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create organizational unit.');
+    }
+  };
+
+  const handleDeleteUnit = async (id: string, name: string) => {
+    if (confirm(`Remove organizational unit "${name}"?`)) {
+      try {
+        await adminService.deleteDepartment(id);
+        setDepartments(departments.filter(d => (d.id !== id && d._id !== id)));
+        toast.success(`Unit "${name}" deleted.`);
+      } catch (err: any) {
+        toast.error(err.message || 'Failed to delete unit.');
+      }
     }
   };
 
@@ -286,7 +329,7 @@ export const OrganizationPage: React.FC = () => {
               <div className="lg:col-span-3 space-y-4">
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">Number of Employees</div>
-                  <div className="text-2xl font-extrabold text-[#004848]">6</div>
+                  <div className="text-2xl font-extrabold text-[#004848]">{orgData.employeeCount !== undefined ? orgData.employeeCount : 6}</div>
                   <div className="text-[11px] text-slate-500">Active full-time across all branches</div>
                 </div>
 
@@ -434,10 +477,14 @@ export const OrganizationPage: React.FC = () => {
           <div className="flex justify-between items-center border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-base font-bold text-slate-900 m-0">Organization Structure Tree</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Hierarchical department decomposition and reporting tree.</p>
+              <p className="text-xs text-slate-500 mt-0.5">Hierarchical department decomposition and organizational reporting hierarchy.</p>
             </div>
-            <button onClick={() => toast.info("Structure edit mode active")} className="px-4 py-1.5 bg-[#004848] text-white text-xs font-bold rounded-lg hover:bg-[#003333] transition-colors cursor-pointer">
-              Edit Tree
+            <button
+              onClick={() => setShowAddUnitModal(true)}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-[#004848] text-white text-xs font-bold rounded-lg hover:bg-[#003333] transition-colors cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Add Unit</span>
             </button>
           </div>
 
@@ -447,26 +494,53 @@ export const OrganizationPage: React.FC = () => {
               <span>{orgData.name || 'HUREMASO'} (Corporate Parent Headquarters)</span>
             </div>
             <div className="pl-6 border-l-2 border-[#004848]/30 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#004848]" />
-                <span className="font-bold text-slate-900">Administration Department</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#004848]" />
-                <span className="font-bold text-slate-900">Engineering & Technology</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#004848]" />
-                <span className="font-bold text-slate-900">Sales & Strategic Marketing</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#004848]" />
-                <span className="font-bold text-slate-900">Client Services & Operations</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#004848]" />
-                <span className="font-bold text-slate-900">Human Capital Management</span>
-              </div>
+              {departments.length > 0 ? (
+                departments.map((dept) => {
+                  const deptId = dept.id || dept._id || dept.name;
+                  return (
+                    <div key={deptId} className="flex items-center justify-between py-1 border-b border-slate-100/80">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-[#004848]" />
+                        <span className="font-bold text-slate-900">{dept.name}</span>
+                        {dept.code && <span className="text-[10px] text-slate-400 font-mono">({dept.code})</span>}
+                        {dept.head && dept.head !== 'Unassigned' && (
+                          <span className="text-[10px] text-slate-500 font-semibold">• Lead: {dept.head}</span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleDeleteUnit(deptId, dept.name)}
+                        className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
+                        title="Delete organizational unit"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#004848]" />
+                    <span className="font-bold text-slate-900">Administration Department</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#004848]" />
+                    <span className="font-bold text-slate-900">Engineering & Technology</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#004848]" />
+                    <span className="font-bold text-slate-900">Sales & Strategic Marketing</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#004848]" />
+                    <span className="font-bold text-slate-900">Client Services & Operations</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#004848]" />
+                    <span className="font-bold text-slate-900">Human Capital Management</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -531,6 +605,61 @@ export const OrganizationPage: React.FC = () => {
                 className="px-4 py-2 bg-[#004848] text-white rounded-lg text-xs font-bold hover:bg-[#003333] cursor-pointer"
               >
                 Save Location
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Organizational Unit Modal */}
+      {showAddUnitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Add Organizational Unit</h3>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block mb-1 font-bold text-slate-700">Unit / Department Name *</label>
+                <input
+                  type="text"
+                  value={newUnitName}
+                  onChange={e => setNewUnitName(e.target.value)}
+                  placeholder="e.g. Cloud Infrastructure"
+                  className="w-full rounded-lg border border-slate-200 p-2.5 outline-none font-semibold text-slate-800 focus:border-[#004848]"
+                />
+              </div>
+              <div>
+                <label className="block mb-1 font-bold text-slate-700">Unit Code</label>
+                <input
+                  type="text"
+                  value={newUnitCode}
+                  onChange={e => setNewUnitCode(e.target.value)}
+                  placeholder="e.g. INFRA-01"
+                  className="w-full rounded-lg border border-slate-200 p-2.5 outline-none font-semibold text-slate-800 focus:border-[#004848]"
+                />
+              </div>
+              <div>
+                <label className="block mb-1 font-bold text-slate-700">Unit Lead / Head</label>
+                <input
+                  type="text"
+                  value={newUnitHead}
+                  onChange={e => setNewUnitHead(e.target.value)}
+                  placeholder="e.g. Sarah Joseph"
+                  className="w-full rounded-lg border border-slate-200 p-2.5 outline-none font-semibold text-slate-800 focus:border-[#004848]"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-3">
+              <button
+                onClick={() => setShowAddUnitModal(false)}
+                className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddUnit}
+                className="px-4 py-2 bg-[#004848] text-white rounded-lg text-xs font-bold hover:bg-[#003333] cursor-pointer"
+              >
+                Save Unit
               </button>
             </div>
           </div>

@@ -9,16 +9,17 @@ export const NationalitiesPage: React.FC = () => {
   const [records, setRecords] = useState<NationalityRecord[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<NationalityRecord | null>(null);
   const [natName, setNatName] = useState('');
 
-  const loadNationalities = async (page: number = 1) => {
+  const loadNationalities = async (page: number = 1, search: string = searchTerm) => {
     setIsLoading(true);
     try {
-      const res = await adminService.getNationalities({ page, limit: 15 });
+      const res = await adminService.getNationalities({ page, limit: 15, search: search.trim() || undefined });
       setRecords(res.data);
       setTotalItems(res.total);
     } catch (err) {
@@ -29,8 +30,15 @@ export const NationalitiesPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadNationalities(currentPage);
+    loadNationalities(currentPage, searchTerm);
   }, [currentPage]);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchTerm(val);
+    setCurrentPage(1);
+    loadNationalities(1, val);
+  };
 
   const handleDelete = async (id: string, name: string) => {
     if (confirm(`Are you sure you want to delete "${name}"?`)) {
@@ -84,12 +92,21 @@ export const NationalitiesPage: React.FC = () => {
       <h2 className="text-sm font-bold text-slate-900 m-0">Nationalities</h2>
 
       <div className="bg-slate-100 border border-slate-200 rounded-xl p-5 space-y-3">
-        {/* Info header bar with Add button */}
-        <div className="flex justify-between items-center pb-1">
-          <span className="text-xs font-bold text-slate-500">({totalItems}) Records Found</span>
+        {/* Info header bar with Add button & Search */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-1">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-500 whitespace-nowrap">({totalItems}) Records Found</span>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              placeholder="Search nationality..."
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-800 bg-white outline-none focus:border-[#0473b8] w-full sm:w-48"
+            />
+          </div>
           <button 
             onClick={handleOpenAdd}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#0473b8] hover:bg-[#03629e] text-white text-xs font-bold rounded-md shadow-xs transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#0473b8] hover:bg-[#03629e] text-white text-xs font-bold rounded-md shadow-xs transition-colors cursor-pointer whitespace-nowrap"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Add Nationality</span>

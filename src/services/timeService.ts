@@ -123,6 +123,35 @@ export const timeService = {
     }
   },
 
+  async getPendingTimesheets(params?: any): Promise<any[]> {
+    try {
+      const query = new URLSearchParams(params || {}).toString();
+      const res = await fetchJson<any>(`${BASE_URL}/timesheets/pending-actions${query ? `?${query}` : ''}`);
+      return Array.isArray(res) ? res : res.items || [];
+    } catch {
+      return [];
+    }
+  },
+
+  async getAccessControlStatus(): Promise<{ configured: boolean; hardwareStatus: string; provider: string; message: string }> {
+    try {
+      return await fetchJson(`${BASE_URL}/timesheets/access-control/status`);
+    } catch {
+      return {
+        configured: false,
+        hardwareStatus: 'disconnected',
+        provider: 'Biometric Access Gateway v2.1',
+        message: 'Access-control hardware integration is currently offline / not configured.',
+      };
+    }
+  },
+
+  async deleteTimesheet(id: string): Promise<any> {
+    return fetchJson(`${BASE_URL}/timesheets/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
   async getMyTimesheets(employeeId?: string, period?: string): Promise<any[]> {
     try {
       const query = new URLSearchParams({ ...(employeeId ? { employeeId } : {}), ...(period ? { period } : {}) }).toString();
@@ -135,6 +164,13 @@ export const timeService = {
   async saveTimesheet(data: any): Promise<any> {
     return fetchJson(`${BASE_URL}/timesheets`, {
       method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateTimesheet(id: string, data: any): Promise<any> {
+    return fetchJson(`${BASE_URL}/timesheets/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     });
   },

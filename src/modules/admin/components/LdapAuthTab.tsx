@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronDown, Loader2 } from 'lucide-react';
 import { useToast } from '../../../hooks/useToast';
+import adminService from '../../../services/adminService';
 
 export const LdapAuthTab: React.FC = () => {
   const toast = useToast();
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
   const [ldapEnabled, setLdapEnabled] = useState(true);
   const [ldapHost, setLdapHost] = useState('localhost');
   const [ldapPort, setLdapPort] = useState('389');
@@ -33,6 +38,107 @@ export const LdapAuthTab: React.FC = () => {
   // Additional settings
   const [ldapMergeUsers, setLdapMergeUsers] = useState(true);
   const [ldapSyncInterval, setLdapSyncInterval] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    adminService.getConfiguration()
+      .then((cfg) => {
+        if (cfg?.ldapAuth) {
+          const l = cfg.ldapAuth;
+          if (l.enabled !== undefined) setLdapEnabled(!!l.enabled);
+          if (l.host !== undefined) setLdapHost(l.host);
+          if (l.port !== undefined) setLdapPort(String(l.port));
+          if (l.encryption !== undefined) setLdapEncryption(l.encryption);
+          if (l.implementation !== undefined) setLdapImpl(l.implementation);
+          if (l.bindAnonymous !== undefined) setLdapBindAnon(!!l.bindAnonymous);
+          if (l.bindDn !== undefined) setLdapDN(l.bindDn);
+          if (l.bindPassword !== undefined) setLdapPass(l.bindPassword);
+          if (l.baseDn !== undefined) setLdapBaseDN(l.baseDn);
+          if (l.searchScope !== undefined) setLdapSearchScope(l.searchScope);
+          if (l.userNameAttr !== undefined) setLdapUserNameAttr(l.userNameAttr);
+          if (l.userSearchFilter !== undefined) setLdapUserSearchFilter(l.userSearchFilter);
+          if (l.userUniqueAttr !== undefined) setLdapUserUniqueAttr(l.userUniqueAttr);
+          if (l.mapFirstName !== undefined) setLdapMapFirstName(l.mapFirstName);
+          if (l.mapMiddleName !== undefined) setLdapMapMiddleName(l.mapMiddleName);
+          if (l.mapLastName !== undefined) setLdapMapLastName(l.mapLastName);
+          if (l.mapStatus !== undefined) setLdapMapStatus(l.mapStatus);
+          if (l.mapEmail !== undefined) setLdapMapEmail(l.mapEmail);
+          if (l.mapEmpId !== undefined) setLdapMapEmpId(l.mapEmpId);
+          if (l.mapEmailToggle !== undefined) setLdapMapEmailToggle(!!l.mapEmailToggle);
+          if (l.mapEmpIdToggle !== undefined) setLdapMapEmpIdToggle(!!l.mapEmpIdToggle);
+          if (l.mergeUsers !== undefined) setLdapMergeUsers(!!l.mergeUsers);
+          if (l.syncInterval !== undefined) setLdapSyncInterval(String(l.syncInterval));
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load LDAP configuration:", err);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await adminService.updateConfiguration({
+        ldapAuth: {
+          enabled: ldapEnabled,
+          host: ldapHost,
+          port: Number(ldapPort) || 389,
+          encryption: ldapEncryption,
+          implementation: ldapImpl,
+          bindAnonymous: ldapBindAnon,
+          bindDn: ldapDN,
+          bindPassword: ldapPass,
+          baseDn: ldapBaseDN,
+          searchScope: ldapSearchScope,
+          userNameAttr: ldapUserNameAttr,
+          userSearchFilter: ldapUserSearchFilter,
+          userUniqueAttr: ldapUserUniqueAttr,
+          mapFirstName: ldapMapFirstName,
+          mapMiddleName: ldapMapMiddleName,
+          mapLastName: ldapMapLastName,
+          mapStatus: ldapMapStatus,
+          mapEmail: ldapMapEmail,
+          mapEmpId: ldapMapEmpId,
+          mapEmailToggle: ldapMapEmailToggle,
+          mapEmpIdToggle: ldapMapEmpIdToggle,
+          mergeUsers: ldapMergeUsers,
+          syncInterval: Number(ldapSyncInterval) || 24,
+        },
+      });
+      toast.success("LDAP Configuration saved successfully!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save LDAP configuration");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    if (!ldapHost) {
+      toast.error("Please enter LDAP host");
+      return;
+    }
+    try {
+      setTesting(true);
+      const res = await adminService.testLdap({
+        serverUrl: ldapHost,
+        port: Number(ldapPort) || 389,
+        bindDn: ldapDN || undefined,
+        password: ldapPass || undefined,
+        baseDn: ldapBaseDN || undefined,
+      });
+      if (res.connected || res.success) {
+        toast.success(res.message || "LDAP connection test succeeded!");
+      } else {
+        toast.error(res.message || "LDAP connection test failed");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "LDAP connection test failed");
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -419,17 +525,22 @@ export const LdapAuthTab: React.FC = () => {
       {/* Action buttons */}
       <div className="flex justify-end gap-3 pt-4">
         <button 
-          onClick={() => toast.info("LDAP connection test initiated...")}
-          className="px-5 py-2.5 border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition-all bg-white cursor-pointer"
+          type="button"
+          disabled={testing}
+          onClick={handleTestConnection}
+          className="flex items-center gap-2 px-5 py-2.5 border border-slate-200 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-50 transition-all bg-white cursor-pointer disabled:opacity-50"
         >
-          Test Connection
+          {testing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          {testing ? "Testing..." : "Test Connection"}
         </button>
         <button 
           type="button"
-          onClick={() => toast.success("LDAP Configuration saved successfully!")}
-          className="px-6 py-2.5 bg-[#0473b8] hover:bg-[#03629e] text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
+          disabled={saving}
+          onClick={handleSave}
+          className="flex items-center gap-2 px-6 py-2.5 bg-[#0473b8] hover:bg-[#03629e] text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
         >
-          Save
+          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          {saving ? "Saving..." : "Save"}
         </button>
       </div>
 

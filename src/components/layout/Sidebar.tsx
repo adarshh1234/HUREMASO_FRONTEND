@@ -752,7 +752,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, isMobileOpen,
             onToggle={toggleGroup}
             location={location}
             items={[
-              { name: 'Timesheets', path: '/time/timesheets' },
+              { name: 'Employee Timesheet', path: '/time/timesheets' },
               { name: 'Attendance', path: '/time/attendance' },
               { name: 'Report', path: '/time/report' },
               { name: 'Project Info', path: '/time/project-info' },
